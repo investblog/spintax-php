@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<phpunit
+	bootstrap="vendor/autoload.php"
+	colors="true"
+	failOnWarning="true"
+	failOnRisky="true"
+>
+	<testsuites>
+		<!-- Suffix is "Test.php", not ".php": PHPUnit *includes* every file it matches, so a bare
+		     ".php" suffix would execute any helper that happens to sit in tests/. -->
+		<testsuite name="spintax">
+			<directory suffix="Test.php">./tests</directory>
+		</testsuite>
+	</testsuites>
+	<coverage>
+		<include>
+			<directory suffix=".php">./src</directory>
+		</include>
+	</coverage>
+</phpunit>

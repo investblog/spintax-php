@@ -1,0 +1,49 @@
+{
+    "name": "spintax/core",
+    "description": "Framework-agnostic spintax engine: enumerations, permutations, variables, conditionals, plural agreement, includes and a post-processing pipeline. Zero dependencies.",
+    "keywords": [
+        "spintax",
+        "text-spinning",
+        "content-generation",
+        "template-engine",
+        "plural",
+        "seo"
+    ],
+    "homepage": "https://spintax.net",
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "301st",
+            "homepage": "https://301.st"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/investblog/spintax-php/issues",
+        "source": "https://github.com/investblog/spintax-php"
+    },
+    "require": {
+        "php": "^8.0",
+        "ext-mbstring": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Spintax\\Core\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Spintax\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}
