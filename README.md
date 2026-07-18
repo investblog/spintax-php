@@ -36,8 +36,12 @@ is enough only until your copy needs to agree with itself:
 | **`spintax/core`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 Plural agreement is the one people discover late. `%n% {товар|товара|товаров}` picks a form at
-random — which is wrong for 1, wrong for 3, and wrong for 5. Russian, Ukrainian and Polish content
+random — which is wrong for 1, wrong for 3, and wrong for 5. Russian, Ukrainian and Serbian content
 cannot be generated correctly without a number-gated form; this engine has one.
+
+Three-form locales are `ru`, `uk`, `be`, `sr`, `hr`, `bs`. Everything else takes the EN-style
+2-form rule — including `pl`, `cs`, `sk`, `sl` and `bg`, whose real rules differ and which are
+therefore **not** yet supported: they are accepted silently and bucketed wrongly, not rejected.
 
 ## Install
 
@@ -55,7 +59,7 @@ composer require spintax/core
 | `%var%` | variable reference (case-insensitive) |
 | `#set %var% = value` | local variable; enumerations inside collapse **once**, so every reference sees the same value |
 | `{?VAR?then\|else}` | conditional — `{?!VAR?…}` inverts it |
-| `{plural <count>: one\|few\|many}` | plural agreement by grammatical bucket (RU/UK/BE 3-form, EN-style 2-form) |
+| `{plural <count>: one\|few\|many}` | plural agreement by grammatical bucket (RU/UK/BE + SR/HR/BS 3-form, EN-style 2-form) |
 | `#include "name"` | embed another template |
 | `/# … #/` | comment, stripped from the output |
 
