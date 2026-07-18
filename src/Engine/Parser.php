@@ -92,12 +92,19 @@ class Parser {
 		$text      = $extracted['body'];
 		$all_vars  = array_merge( $extracted['set'], $variables );
 
-		// Roll `#def` values before expansion, in dependency order. This is the same contract the
-		// full pipeline implements, minus the two passes this method does not run at all
-		// (conditionals and plurals) — a value carrying those is frozen with them unresolved here.
-		// Callers needing the whole language want `Spintax\Core\Render\Pipeline`.
-		foreach ( $this->order_definitions( $extracted['def'], $extracted['set'] ) as $name ) {
-			if ( array_key_exists( $name, $variables ) ) {
+		// Caller keys are compared lowercased: `%var%` references are case-insensitive everywhere
+		// else, so `['X' => …]` has to outrank `#def %x%` exactly as `['x' => …]` does.
+		$caller = array_change_key_case( $variables, CASE_LOWER );
+
+		// Roll `#def` values before expansion, in dependency order — following aliases through
+		// everything visible here, caller variables included, not just the local `#set` map. This
+		// is the same contract the full pipeline implements, minus the two passes this method does
+		// not run at all (conditionals and plurals): a value carrying those is frozen with them
+		// unresolved. Callers needing the whole language want `Spintax\Core\Render\Pipeline`.
+		$aliases = array_diff_key( array_change_key_case( $all_vars, CASE_LOWER ), $extracted['def'] );
+
+		foreach ( $this->order_definitions( $extracted['def'], $aliases ) as $name ) {
+			if ( array_key_exists( $name, $caller ) ) {
 				continue;
 			}
 

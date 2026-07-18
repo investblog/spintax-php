@@ -56,6 +56,22 @@ final class ParserProcessDefTest extends TestCase {
 		);
 	}
 
+	public function test_a_caller_variable_outranks_a_def_whatever_its_case(): void {
+		// `%var%` references are case-insensitive everywhere else in the language, so the caller's
+		// 'X' has to win against `#def %x%` exactly as a lowercase 'x' does.
+		$this->assertSame(
+			'CALLER',
+			trim( $this->parser()->process( "#def %x% = {a|b}\n%x%", array( 'X' => 'CALLER' ) ) )
+		);
+	}
+
+	public function test_process_orders_definitions_through_a_caller_variable_alias(): void {
+		$this->assertSame(
+			'1',
+			trim( $this->parser()->process( "#def %b% = %s%\n#def %a% = {1|2}\n%b%", array( 's' => '%a%' ) ) )
+		);
+	}
+
 	public function test_extract_set_directives_still_reports_only_set(): void {
 		$extracted = $this->parser()->extract_set_directives( "#set %a% = 1\n#def %b% = 2\nbody" );
 

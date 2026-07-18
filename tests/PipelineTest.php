@@ -323,6 +323,80 @@ final class PipelineTest extends TestCase {
 		);
 	}
 
+	public function test_a_def_dependency_hidden_behind_a_global_alias_is_still_ordered(): void {
+		// Same shape as the #set-alias case, but the alias lives in the globals layer — which the
+		// roll renders against, yet an ordering built only from the local #set map cannot see.
+		$p = new Pipeline( $this->parser(), array( 's' => '%a%' ) );
+
+		$this->assertSame(
+			'1 item',
+			trim(
+				$p->render(
+					"#def %b% = %s% {plural %s%: item|items}\n#def %a% = {1|2}\n%b%",
+					array(),
+					null,
+					'en_US',
+					false
+				)
+			)
+		);
+	}
+
+	public function test_a_def_dependency_hidden_behind_a_runtime_alias_is_still_ordered(): void {
+		$p = new Pipeline( $this->parser() );
+
+		$this->assertSame(
+			'1 item',
+			trim(
+				$p->render(
+					"#def %b% = %s% {plural %s%: item|items}\n#def %a% = {1|2}\n%b%",
+					array( 's' => '%a%' ),
+					null,
+					'en_US',
+					false
+				)
+			)
+		);
+	}
+
+	/**
+	 * @return Pipeline A pipeline that protects `[host …]` and marks whatever survives to stage 9.
+	 */
+	private function host_pipeline( array $globals = array() ): Pipeline {
+		return new Pipeline(
+			$this->parser(),
+			$globals,
+			null,
+			array( '/\[host\s+[^\]]+\]/i' ),
+			static fn( string $text ): string => (string) preg_replace( '/\[host\s+[^\]]+\]/i', '<INTACT>', $text )
+		);
+	}
+
+	/**
+	 * @dataProvider host_construct_sources
+	 */
+	public function test_a_host_construct_survives_however_it_reaches_the_document( string $template, array $globals ): void {
+		// Stage 8 reads `[host id="1"]` as a single-element permutation and strips the brackets, so
+		// anything that arrives after the first shield used to reach the stage 9 hook as inert
+		// text. True of #set and globals long before #def existed.
+		$this->assertSame(
+			'<INTACT>',
+			trim( $this->host_pipeline( $globals )->render( $template, array(), null, '', false ) )
+		);
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: array<string, string>}>
+	 */
+	public function host_construct_sources(): array {
+		return array(
+			'written in the body' => array( '[host id="1"]', array() ),
+			'through a #def'      => array( "#def %x% = [host id=\"1\"]\n%x%", array() ),
+			'through a #set'      => array( "#set %x% = [host id=\"1\"]\n%x%", array() ),
+			'through a global'    => array( '%g%', array( 'g' => '[host id="1"]' ) ),
+		);
+	}
+
 	public function test_an_empty_directive_value_is_legal_for_both_directives(): void {
 		$p = $this->sequenced_pipeline( array( 0 ) );
 

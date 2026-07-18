@@ -34,6 +34,23 @@ existing templates mean. Ships in lockstep with the WordPress plugin 3.0.0, `@sp
   disagreed: the parser accepted `#set %x% =` as an empty value, which is a supported case, while
   the validator reported it as malformed unless the author happened to leave a trailing space.
 
+### Fixed
+
+- **A host construct inside a variable value is no longer destroyed.** Constructs matched by the
+  `$protect` patterns were shielded once, before the body was processed, so any that arrived later —
+  carried in by a `#set`, a global, a runtime variable or a frozen `#def` — reached the permutation
+  resolver unprotected. `[shortcode id="1"]` reads as a single-element permutation, so the brackets
+  were stripped and the construct reached the stage 9 hook as inert text. There is now a second
+  shield pass after variable expansion, and definition values are shielded for the length of their
+  roll.
+
+  This predates `#def` — `#set` and globals lost constructs the same way — and it is a host-seam
+  concern, so no golden-corpus fixture can cover it: `$protect` is empty in a host-free run. Each
+  engine has to carry its own regression test. For the WordPress plugin the construct in question is
+  `[spintax …]`, and note that this widens nothing security-wise: data-derived (T2) values are
+  entity-encoded by `SpintaxShield` before they ever reach the engine, so a variable holding a
+  shortcode can only come from a markup-authoring (T1) source that was already trusted to write one.
+
 ### Added
 
 - **`#def %var% = value` — roll-once.** The value is rendered once, as if it were a miniature
