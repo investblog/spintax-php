@@ -57,7 +57,8 @@ composer require spintax/core
 | `[a\|b\|c]` | **permutation** — pick N, shuffle, join |
 | `[<minsize=2;maxsize=3;sep=", ";lastsep=" and "> a\|b\|c]` | configured permutation |
 | `%var%` | variable reference (case-insensitive) |
-| `#set %var% = value` | local variable; enumerations inside collapse **once**, so every reference sees the same value |
+| `#set %var% = value` | local variable, **macro**: the value is substituted at every reference and its brackets re-roll each time |
+| `#def %var% = value` | local variable, **roll-once**: the value is rendered a single time and every reference sees that same text |
 | `{?VAR?then\|else}` | conditional — `{?!VAR?…}` inverts it |
 | `{plural <count>: one\|few\|many}` | plural agreement by grammatical bucket (RU/UK/BE + SR/HR/BS 3-form, EN-style 2-form) |
 | `#include "name"` | embed another template |

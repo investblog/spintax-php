@@ -32,6 +32,21 @@ class Parser {
 	 *
 	 * @var int
 	 */
+	/**
+	 * The one grammar for `#set` and `#def`, shared by the parser and the validator.
+	 *
+	 * Whitespace classes are restricted to spaces and tabs on purpose. `\s` would
+	 * let the engine consume the newlines around `=` and capture the next
+	 * directive as the value of an empty one — see
+	 * `test_extract_set_directives_empty_value_does_not_swallow_next`.
+	 *
+	 * The value group is `(.*?)`, not `(.+)`: an empty value is legal. The
+	 * validator used to disagree on both counts and reported `#set %x% =` as
+	 * malformed while the parser accepted it; anything checking these directives
+	 * must build on this constant rather than write its own pattern.
+	 */
+	public const DIRECTIVE_PATTERN = '/^[ \t]*#(set|def)[ \t]+%(\w+)%[ \t]*=[ \t]*(.*?)[ \t]*$/mu';
+
 	private const MAX_ITERATIONS = 10000;
 
 	/**
@@ -95,28 +110,67 @@ class Parser {
 	 * @return array{body: string, variables: array<string, string>}
 	 */
 	public function extract_set_directives( string $text ): array {
-		$variables = array();
-
-		// Whitespace classes are restricted to spaces/tabs. Using \s would
-		// allow the engine to consume newlines around `=` and capture the
-		// next directive as the value of an empty one — see the
-		// `test_extract_set_directives_empty_value_does_not_swallow_next` case.
-		$body = preg_replace_callback(
-			'/^[ \t]*#set[ \t]+%(\w+)%[ \t]*=[ \t]*(.*?)[ \t]*$/mu',
-			static function ( array $m ) use ( &$variables ): string {
-				$name               = strtolower( $m[1] );
-				$variables[ $name ] = $m[2];
-				return '';
-			},
-			$text
-		);
-
-		// Collapse blank lines left by stripped directives.
-		$body = preg_replace( "/\n{3,}/u", "\n\n", $body );
+		$extracted = $this->extract_directives( $text );
 
 		return array(
-			'body'      => $body,
-			'variables' => $variables,
+			'body'      => $extracted['body'],
+			'variables' => $extracted['set'],
+		);
+	}
+
+	/**
+	 * Extract `#set` and `#def` directives and remove them from the body.
+	 *
+	 * `#set` is a macro: the value is substituted at every `%var%` reference and
+	 * whatever brackets it holds resolve independently each time. `#def` is
+	 * roll-once: the value is rendered a single time and the result is held for
+	 * every reference. Both share one grammar, deliberately — see
+	 * `DIRECTIVE_PATTERN`.
+	 *
+	 * `occurrences` preserves every directive line in source order, including
+	 * duplicates that the `set` / `def` maps flatten away. A validator cannot
+	 * report a collision it can no longer see, so the raw list is the contract.
+	 *
+	 * @param string $text Text containing directives.
+	 * @return array{body: string, set: array<string, string>, def: array<string, string>, occurrences: list<array{kind: string, name: string, value: string, line: int}>}
+	 */
+	public function extract_directives( string $text ): array {
+		$occurrences = array();
+
+		if ( preg_match_all( self::DIRECTIVE_PATTERN, $text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+			foreach ( $matches as $match ) {
+				$offset = (int) $match[0][1];
+
+				$occurrences[] = array(
+					'kind'  => strtolower( $match[1][0] ),
+					'name'  => strtolower( $match[2][0] ),
+					'value' => $match[3][0],
+					'line'  => substr_count( $text, "\n", 0, $offset ) + 1,
+				);
+			}
+		}
+
+		$set = array();
+		$def = array();
+
+		foreach ( $occurrences as $occurrence ) {
+			if ( 'def' === $occurrence['kind'] ) {
+				$def[ $occurrence['name'] ] = $occurrence['value'];
+			} else {
+				$set[ $occurrence['name'] ] = $occurrence['value'];
+			}
+		}
+
+		$body = (string) preg_replace( self::DIRECTIVE_PATTERN, '', $text );
+
+		// Collapse blank lines left by stripped directives.
+		$body = (string) preg_replace( "/\n{3,}/u", "\n\n", $body );
+
+		return array(
+			'body'        => $body,
+			'set'         => $set,
+			'def'         => $def,
+			'occurrences' => $occurrences,
 		);
 	}
 

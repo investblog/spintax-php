@@ -193,4 +193,120 @@ final class PipelineTest extends TestCase {
 
 		$this->assertSame( '5 файлов', trim( $p->render( '#include "count"', array(), null, 'ru_RU', false ) ) );
 	}
+
+	/**
+	 * A pipeline whose RNG walks a fixed sequence of offsets.
+	 *
+	 * The difference between `#set` and `#def` is a difference in how many draws a render
+	 * consumes, so a first-option parser cannot tell them apart — both would answer `a`. Walking a
+	 * sequence is what makes the distinction observable: two draws produce two values, one draw
+	 * produces one that repeats.
+	 *
+	 * @param list<int> $offsets Offset from the low bound, per successive draw.
+	 */
+	private function sequenced_pipeline( array $offsets ): Pipeline {
+		$index = 0;
+
+		$rng = static function ( int $min, int $max ) use ( $offsets, &$index ): int {
+			$offset = $offsets[ $index ] ?? 0;
+			++$index;
+
+			return min( $max, $min + $offset );
+		};
+
+		return new Pipeline( new Parser( $rng ) );
+	}
+
+	public function test_set_is_a_macro_and_re_rolls_at_every_reference(): void {
+		$p = $this->sequenced_pipeline( array( 0, 1 ) );
+
+		$this->assertSame(
+			'a-b',
+			trim( $p->render( "#set %x% = {a|b}\n%x%-%x%", array(), null, '', false ) )
+		);
+	}
+
+	public function test_def_rolls_once_and_holds_the_value(): void {
+		// The same RNG sequence as the test above. `#set` consumes both draws; `#def` consumes the
+		// first and never reaches the second.
+		$p = $this->sequenced_pipeline( array( 0, 1 ) );
+
+		$this->assertSame(
+			'a-a',
+			trim( $p->render( "#def %x% = {a|b}\n%x%-%x%", array(), null, '', false ) )
+		);
+	}
+
+	public function test_def_rolls_permutations_too_so_bracket_type_decides_nothing(): void {
+		$p = $this->sequenced_pipeline( array( 1, 0, 1, 0 ) );
+
+		$out = trim( $p->render( "#def %x% = [<sep=-> a|b]\n%x% / %x%", array(), null, '', false ) );
+		[ $left, $right ] = explode( ' / ', $out );
+
+		$this->assertSame( $left, $right );
+	}
+
+	public function test_def_resolves_against_globals_and_runtime_not_a_bare_context(): void {
+		// The roll runs after the context is assembled. Were it to run where the old collapse-once
+		// pass sat, `%name%` would freeze as the literal text `%name%`.
+		$p = new Pipeline( $this->parser(), array( 'brand' => 'Acme' ) );
+
+		$this->assertSame(
+			'Acme/Ltd-a Acme/Ltd-a',
+			trim( $p->render( "#def %x% = %brand%/%suffix%-{a|b}\n%x% %x%", array( 'suffix' => 'Ltd' ), null, '', false ) )
+		);
+	}
+
+	public function test_a_runtime_variable_outranks_a_def_of_the_same_name(): void {
+		$p = $this->sequenced_pipeline( array( 0 ) );
+
+		$this->assertSame(
+			'RUNTIME',
+			trim( $p->render( "#def %x% = {a|b}\n%x%", array( 'x' => 'RUNTIME' ), null, '', false ) )
+		);
+	}
+
+	public function test_a_def_built_from_another_def_sees_the_frozen_value(): void {
+		// Declaration order is deliberately reversed: %b% is defined before the %a% it depends on,
+		// so this passes only if the roll resolves in dependency order rather than source order.
+		$p = $this->sequenced_pipeline( array( 0 ) );
+
+		$this->assertSame(
+			'p! p! p',
+			trim( $p->render( "#def %b% = %a%!\n#def %a% = {p|q}\n%b% %b% %a%", array(), null, '', false ) )
+		);
+	}
+
+	public function test_a_def_counter_agrees_with_the_number_it_prints(): void {
+		// The case collapse-once existed to fix, now carried by #def. The failure it guards against
+		// is not an unresolved count slot but a disagreement: the printed number and the agreed
+		// noun must come from the same draw.
+		$p = $this->sequenced_pipeline( array( 1 ) );
+
+		$this->assertSame(
+			'Принимаем 4: валюты',
+			trim( $p->render( "#def %n% = {1|4|9}\nПринимаем %n%: {plural %n%: валюта|валюты|валют}", array(), null, 'ru_RU', false ) )
+		);
+	}
+
+	public function test_a_set_counter_drops_the_plural_block_which_is_why_the_linter_exists(): void {
+		// Accepted consequence of `#set` being a macro: the count slot still holds `{1|4|9}` when
+		// the plural pass runs, so the block resolves to nothing. Pinned here so the behaviour is a
+		// decision on record rather than a surprise, and so the validator's `plural.count-macro`
+		// diagnostic has something concrete to point authors away from.
+		$p = $this->sequenced_pipeline( array( 1 ) );
+
+		$this->assertSame(
+			'Принимаем 4:',
+			trim( $p->render( "#set %n% = {1|4|9}\nПринимаем %n%: {plural %n%: валюта|валюты|валют}", array(), null, 'ru_RU', false ) )
+		);
+	}
+
+	public function test_an_empty_directive_value_is_legal_for_both_directives(): void {
+		$p = $this->sequenced_pipeline( array( 0 ) );
+
+		// Delimited with parentheses, not brackets: `[…]` is the permutation syntax and would be
+		// consumed by stage 8 rather than framing the value.
+		$this->assertSame( 'x=() y=()', trim( $p->render( "#set %x% =\n#def %y% =\nx=(%x%) y=(%y%)", array(), null, '', false ) ) );
+	}
 }

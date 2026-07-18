@@ -6,6 +6,57 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## Unreleased
+
+`#set` goes back to being a macro, and `#def` carries roll-once. Breaking: it changes what
+existing templates mean. Ships in lockstep with the WordPress plugin 3.0.0, `@spintax/core`
+0.3.0 and the OpenCart port.
+
+### Changed
+
+- **`#set` is a macro again.** The value is substituted at every `%var%` reference and whatever
+  brackets it holds resolve independently each time. 0.2.0 collapsed an enumeration-valued `#set`
+  once at set-time; that behaviour is gone.
+
+  It was worth reverting because it was the newcomer, not the contract. It shipped 2026-07-04,
+  was announced in one changelog line, and contradicted the project's published documentation from
+  the day it landed — spintax.net has a whole section teaching independent re-rolling as a design
+  rule, in fourteen locales. Macro expansion is what the engine did before that, and what every
+  consumer written against those docs assumes. Note also that **no test anywhere in this package
+  pinned the collapsed behaviour**: it could have flipped in either direction unnoticed, which is
+  why the new semantics arrives with tests and corpus fixtures rather than a changelog entry.
+
+- **The bracket type no longer decides anything.** Previously `{…}` in a `#set` collapsed while
+  `[…]` re-rolled, because the guard only looked for `{`. That asymmetry was documented nowhere.
+  Now `#set` re-rolls both and `#def` freezes both.
+
+- **The validator and the parser share one grammar** — `Parser::DIRECTIVE_PATTERN`. They had
+  disagreed: the parser accepted `#set %x% =` as an empty value, which is a supported case, while
+  the validator reported it as malformed unless the author happened to leave a trailing space.
+
+### Added
+
+- **`#def %var% = value` — roll-once.** The value is rendered once, as if it were a miniature
+  template, and the result is held for every reference. It covers enumerations *and* permutations,
+  resolves in dependency order so a `#def` built from another `#def` sees the frozen text, and runs
+  **after** the variable context is assembled, so it can read globals and runtime variables. A
+  runtime variable of the same name still outranks it.
+
+  This is where a plural counter now lives: `#def %n% = {1|4|9}` followed by
+  `{plural %n%: …}` prints and agrees the same number. Under `#set` the two disagree — the count
+  slot still holds `{1|4|9}` when the plural pass runs — and that is the accepted consequence of a
+  macro, pinned by a test and reported by the forthcoming `plural.count-macro` diagnostic.
+
+- **`Parser::extract_directives()`** returns body, `set`, `def`, and an `occurrences` list that
+  preserves every directive line with its number. The maps flatten duplicates; a validator cannot
+  report a collision it can no longer see. `extract_set_directives()` remains as a wrapper.
+
+### Migration
+
+A `#set` whose value is an enumeration or permutation *and* which is referenced more than once for
+consistency — a plural counter, a brand name that must not vary mid-sentence — becomes `#def`. One
+line per definition; references are untouched.
+
 ## 0.2.0 — 2026-07-18
 
 Serbian, Croatian and Bosnian join the 3-form plural family. Minor, not patch: this changes

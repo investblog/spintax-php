@@ -4,11 +4,12 @@
  *
  * The engine primitives (Parser, Conditionals, Plurals) are each individually pure, but the
  * SEMANTICS live in the order they run in. Conditionals run BOTH before and after variable
- * expansion; plurals run before enumerations (so `{plural %n%: …}` sees a literal count);
- * enumerations inside a `#set` value collapse ONCE at set-time, so `#set %n% = {1|4|9}` binds one
- * stable number rather than re-rolling per reference. Get that order wrong and plurals and
- * conditionals fail silently — which is exactly the bug this engine shipped once, and why the
- * order is a class here rather than a paragraph in a README each host re-implements.
+ * expansion; plurals run before enumerations (so `{plural %n%: …}` sees a literal count); and a
+ * `#def` value is rendered ONCE, after the context exists, so every reference to it sees the same
+ * text, while a `#set` value is substituted verbatim and re-rolls at each reference. Get that order
+ * wrong and plurals and conditionals fail silently — which is exactly the bug this engine shipped
+ * once, and why the order is a class here rather than a paragraph in a README each host
+ * re-implements.
  *
  * Two seams are left for the host, and only two:
  *
@@ -168,31 +169,32 @@ final class Pipeline {
 		// Stage 3: strip comments.
 		$text = $this->parser->strip_comments( $raw );
 
-		// Stage 4: extract #set directives and remove them from the body.
-		$extracted = $this->parser->extract_set_directives( $text );
+		// Stage 4: extract #set and #def directives and remove them from the body.
+		$extracted = $this->parser->extract_directives( $text );
 		$text      = $extracted['body'];
 
-		// Stage 4b: collapse enumerations inside #set values ONCE, so a local variable holds a
-		// single stable value (`#set %n% = {1|4|9}` becomes "4" and stays "4" at every reference).
-		// Critically, it also lets `{plural %n%: …}` see a number: the plural pass runs before
-		// enumeration resolution and would otherwise be handed an unresolved `{1|4|9}` and drop the
-		// block. Values carrying conditionals or plurals are left alone — they may reference
-		// variables defined on other lines and must stay deferred to stages 6a-6d.
-		foreach ( $extracted['variables'] as $set_name => $set_value ) {
-			if ( false === strpos( $set_value, '{' ) ) {
-				continue;
-			}
-			if ( false !== strpos( $set_value, '{?' ) || false !== strpos( $set_value, '{plural ' ) ) {
-				continue;
-			}
-			$extracted['variables'][ $set_name ] = $this->parser->resolve_enumerations( $set_value );
-		}
-
-		// Stage 5: build the variable context. Precedence: runtime > local (#set) > global.
-		$context = $context->with_local( $extracted['variables'] );
+		// Stage 5: build the variable context. Precedence: runtime > local > global — and
+		// `get_merged_variables()` enforces that by merge order, not by the order these calls
+		// are made in.
+		$context = $context->with_local( $extracted['set'] );
 		if ( ! empty( $runtime_vars ) ) {
 			$context = $context->with_runtime( $runtime_vars );
 		}
+
+		// Stage 5b: roll `#def` values ONCE, and only now — the full context has to exist first.
+		// A `#def` value is rendered as if it were a miniature body and the result is frozen for
+		// every reference, which is what `#set` deliberately does NOT do: a `#set` value is
+		// substituted verbatim and its brackets resolve independently at each reference.
+		//
+		// Doing this before stage 5 (where the old collapse-once pass sat) would hand the roll a
+		// context with no globals and no runtime variables, so `#def %x% = %product_name% {a|b}`
+		// would freeze the literal text `%product_name%`.
+		if ( ! empty( $extracted['def'] ) ) {
+			$context = $context->with_local(
+				$this->roll_definitions( $extracted['def'], $context, $runtime_vars, $locale )
+			);
+		}
+
 		$all_vars = $context->get_merged_variables();
 
 		// Shield host constructs so the enumeration/permutation resolvers never see their brackets.
@@ -252,6 +254,99 @@ final class Pipeline {
 		}
 
 		return $text;
+	}
+
+	/**
+	 * Render each `#def` value once and return the frozen results.
+	 *
+	 * Values are rendered in dependency order so a `#def` built out of another `#def` sees the
+	 * resolved text rather than the raw template. Order is discovered by repeated passes: on each
+	 * pass every definition whose value no longer references an unresolved definition is rendered.
+	 * A pass that resolves nothing means what is left is a cycle, and those are rendered anyway —
+	 * `expand_variables()` carries its own depth guard, so a cycle degrades to a bounded expansion
+	 * instead of hanging here.
+	 *
+	 * A name that a runtime variable also defines is skipped: runtime outranks locals, so rolling
+	 * it would be work whose result nothing can read.
+	 *
+	 * @param array<string, string> $definitions  Raw `#def` values, name => value.
+	 * @param RenderContext         $context      Context with globals, `#set` locals and runtime.
+	 * @param array<string, string> $runtime_vars Runtime variables, which outrank every local.
+	 * @param string                $locale       Plural locale.
+	 * @return array<string, string> Frozen values, name => rendered text.
+	 */
+	private function roll_definitions(
+		array $definitions,
+		RenderContext $context,
+		array $runtime_vars,
+		string $locale
+	): array {
+		$vars     = $context->get_merged_variables();
+		$outranked = array_change_key_case( $runtime_vars, CASE_LOWER );
+		$pending   = array();
+		$resolved  = array();
+
+		foreach ( $definitions as $name => $value ) {
+			if ( array_key_exists( strtolower( $name ), $outranked ) ) {
+				continue;
+			}
+			$pending[ $name ] = $value;
+		}
+
+		while ( ! empty( $pending ) ) {
+			$progressed = false;
+
+			foreach ( $pending as $name => $value ) {
+				foreach ( array_keys( $pending ) as $unresolved ) {
+					if ( false !== stripos( $value, '%' . $unresolved . '%' ) ) {
+						continue 2;
+					}
+				}
+
+				$resolved[ $name ] = $this->render_definition_value(
+					$value,
+					array_merge( $vars, $resolved ),
+					$locale
+				);
+				unset( $pending[ $name ] );
+				$progressed = true;
+			}
+
+			if ( ! $progressed ) {
+				break;
+			}
+		}
+
+		foreach ( $pending as $name => $value ) {
+			$resolved[ $name ] = $this->render_definition_value(
+				$value,
+				array_merge( $vars, $resolved ),
+				$locale
+			);
+		}
+
+		return $resolved;
+	}
+
+	/**
+	 * Render one `#def` value through the same passes the body gets, in the same order.
+	 *
+	 * Stage 9 (`#include`) is deliberately absent: includes resolve after everything here and
+	 * cannot be frozen into a value.
+	 *
+	 * @param string                $value  Raw directive value.
+	 * @param array<string, string> $vars   Variables visible to this value.
+	 * @param string                $locale Plural locale.
+	 * @return string
+	 */
+	private function render_definition_value( string $value, array $vars, string $locale ): string {
+		$value = $this->conditionals->apply( $value, $vars );
+		$value = $this->parser->expand_variables( $value, $vars );
+		$value = $this->conditionals->apply( $value, $vars );
+		$value = $this->plurals->apply( $value, $locale, array( 'lenient' => true ) );
+		$value = $this->parser->resolve_enumerations( $value );
+
+		return $this->parser->resolve_permutations( $value );
 	}
 
 	/**
