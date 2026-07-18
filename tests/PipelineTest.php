@@ -302,6 +302,27 @@ final class PipelineTest extends TestCase {
 		);
 	}
 
+	public function test_a_def_dependency_hidden_behind_a_set_alias_is_still_ordered(): void {
+		// %b% never mentions %a%. It reaches it through the #set alias %s%, which is expanded at
+		// reference time, so the dependency is invisible in %b%'s own text. Ordering on direct
+		// references alone rolled %b% first and froze an unexpanded %a% into it — which then made
+		// the plural block vanish, because its count slot was not a number.
+		$p = $this->sequenced_pipeline( array( 0 ) );
+
+		$this->assertSame(
+			'1 item',
+			trim(
+				$p->render(
+					"#def %b% = %s% {plural %s%: item|items}\n#set %s% = %a%\n#def %a% = {1|2}\n%b%",
+					array(),
+					null,
+					'en_US',
+					false
+				)
+			)
+		);
+	}
+
 	public function test_an_empty_directive_value_is_legal_for_both_directives(): void {
 		$p = $this->sequenced_pipeline( array( 0 ) );
 

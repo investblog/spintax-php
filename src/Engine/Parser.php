@@ -28,11 +28,6 @@ class Parser {
 	private $random_fn;
 
 	/**
-	 * Maximum iterations for enumeration/permutation resolution.
-	 *
-	 * @var int
-	 */
-	/**
 	 * The one grammar for `#set` and `#def`, shared by the parser and the validator.
 	 *
 	 * Whitespace classes are restricted to spaces and tabs on purpose. `\s` would
@@ -47,6 +42,17 @@ class Parser {
 	 */
 	public const DIRECTIVE_PATTERN = '/^[ \t]*#(set|def)[ \t]+%(\w+)%[ \t]*=[ \t]*(.*?)[ \t]*$/mu';
 
+	/**
+	 * A `%var%` reference. Shared by expansion and by `#def` dependency discovery, so the two
+	 * cannot disagree about what counts as a reference.
+	 */
+	public const VARIABLE_PATTERN = '/%(\w+)%/u';
+
+	/**
+	 * Maximum iterations for enumeration/permutation resolution.
+	 *
+	 * @var int
+	 */
 	private const MAX_ITERATIONS = 10000;
 
 	/**
@@ -82,10 +88,25 @@ class Parser {
 	 */
 	public function process( string $template, array $variables = array() ): string {
 		$text      = $this->strip_comments( $template );
-		$extracted = $this->extract_set_directives( $text );
+		$extracted = $this->extract_directives( $text );
 		$text      = $extracted['body'];
-		$all_vars  = array_merge( $extracted['variables'], $variables );
-		$text      = $this->expand_variables( $text, $all_vars );
+		$all_vars  = array_merge( $extracted['set'], $variables );
+
+		// Roll `#def` values before expansion, in dependency order. This is the same contract the
+		// full pipeline implements, minus the two passes this method does not run at all
+		// (conditionals and plurals) — a value carrying those is frozen with them unresolved here.
+		// Callers needing the whole language want `Spintax\Core\Render\Pipeline`.
+		foreach ( $this->order_definitions( $extracted['def'], $extracted['set'] ) as $name ) {
+			if ( array_key_exists( $name, $variables ) ) {
+				continue;
+			}
+
+			$rolled            = $this->expand_variables( $extracted['def'][ $name ], $all_vars );
+			$rolled            = $this->resolve_enumerations( $rolled );
+			$all_vars[ $name ] = $this->resolve_permutations( $rolled );
+		}
+
+		$text = $this->expand_variables( $text, $all_vars );
 		$text      = $this->resolve_enumerations( $text );
 		$text      = $this->resolve_permutations( $text );
 		$text      = $this->post_process( $text );
@@ -110,12 +131,125 @@ class Parser {
 	 * @return array{body: string, variables: array<string, string>}
 	 */
 	public function extract_set_directives( string $text ): array {
-		$extracted = $this->extract_directives( $text );
+		// Deliberately `#set` only, matching this method's name and its pre-`#def` contract. Making
+		// it strip `#def` too would remove those lines from the body while returning no value for
+		// them, so `%x%` would survive into the output as literal text — a directive silently
+		// eaten. Callers that want both use `extract_directives()`.
+		$variables = array();
+
+		$body = (string) preg_replace_callback(
+			'/^[ \t]*#set[ \t]+%(\w+)%[ \t]*=[ \t]*(.*?)[ \t]*$/mu',
+			static function ( array $m ) use ( &$variables ): string {
+				$variables[ strtolower( $m[1] ) ] = $m[2];
+				return '';
+			},
+			$text
+		);
+
+		$body = (string) preg_replace( "/\n{3,}/u", "\n\n", $body );
 
 		return array(
-			'body'      => $extracted['body'],
-			'variables' => $extracted['set'],
+			'body'      => $body,
+			'variables' => $variables,
 		);
+	}
+
+	/**
+	 * Order `#def` names so a definition is rendered after everything it depends on.
+	 *
+	 * Dependencies are followed **through `#set` values**. A `#def` can reach another `#def` by way
+	 * of an alias — `#def %b% = %s%` where `#set %s% = %a%` — and because a `#set` is expanded at
+	 * reference time, that dependency is invisible in `%b%`'s own text. Discovering only direct
+	 * references would roll `%b%` while `%a%` is still raw, and the frozen value would carry an
+	 * unexpanded `%a%`.
+	 *
+	 * A cycle cannot be ordered, so its members are emitted last in declaration order; rendering
+	 * them then relies on `expand_variables()`'s own depth guard rather than looping here.
+	 *
+	 * @param array<string, string> $definitions `#def` values, name => raw value.
+	 * @param array<string, string> $set_values  `#set` values, name => raw value, for alias hops.
+	 * @return list<string> Definition names, dependencies first.
+	 */
+	public function order_definitions( array $definitions, array $set_values = array() ): array {
+		$names   = array_keys( $definitions );
+		$blocked = array();
+
+		foreach ( $definitions as $name => $value ) {
+			$blocked[ $name ] = array_intersect(
+				$this->referenced_names( $value, $set_values ),
+				$names
+			);
+		}
+
+		$ordered = array();
+		$pending = $names;
+
+		while ( ! empty( $pending ) ) {
+			$progressed = false;
+
+			foreach ( $pending as $index => $name ) {
+				foreach ( $blocked[ $name ] as $dependency ) {
+					if ( $dependency !== $name && in_array( $dependency, $pending, true ) ) {
+						continue 2;
+					}
+				}
+
+				$ordered[] = $name;
+				unset( $pending[ $index ] );
+				$progressed = true;
+			}
+
+			$pending = array_values( $pending );
+
+			if ( ! $progressed ) {
+				return array_merge( $ordered, $pending );
+			}
+		}
+
+		return $ordered;
+	}
+
+	/**
+	 * Every variable name a value reaches, hopping through `#set` aliases.
+	 *
+	 * @param string                $value      Raw value.
+	 * @param array<string, string> $set_values `#set` values to follow through.
+	 * @return list<string> Referenced names, lowercased.
+	 */
+	private function referenced_names( string $value, array $set_values ): array {
+		$queue = $this->direct_references( $value );
+		$seen  = array();
+
+		while ( ! empty( $queue ) ) {
+			$name = array_shift( $queue );
+
+			if ( isset( $seen[ $name ] ) ) {
+				continue;
+			}
+			$seen[ $name ] = true;
+
+			if ( array_key_exists( $name, $set_values ) ) {
+				foreach ( $this->direct_references( $set_values[ $name ] ) as $next ) {
+					$queue[] = $next;
+				}
+			}
+		}
+
+		return array_keys( $seen );
+	}
+
+	/**
+	 * The `%var%` names written literally in a string.
+	 *
+	 * @param string $text Text to scan.
+	 * @return list<string> Names, lowercased.
+	 */
+	private function direct_references( string $text ): array {
+		if ( ! preg_match_all( self::VARIABLE_PATTERN, $text, $matches ) ) {
+			return array();
+		}
+
+		return array_map( 'strtolower', $matches[1] );
 	}
 
 	/**
@@ -193,7 +327,7 @@ class Parser {
 		for ( $i = 0; $i < self::MAX_VARIABLE_DEPTH; $i++ ) {
 			$changed = false;
 			$text    = preg_replace_callback(
-				'/%(\w+)%/u',
+				self::VARIABLE_PATTERN,
 				static function ( array $m ) use ( $normalised, &$changed ): string {
 					$name = strtolower( $m[1] );
 					if ( isset( $normalised[ $name ] ) ) {

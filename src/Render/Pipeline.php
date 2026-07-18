@@ -191,7 +191,7 @@ final class Pipeline {
 		// would freeze the literal text `%product_name%`.
 		if ( ! empty( $extracted['def'] ) ) {
 			$context = $context->with_local(
-				$this->roll_definitions( $extracted['def'], $context, $runtime_vars, $locale )
+				$this->roll_definitions( $extracted['def'], $extracted['set'], $context, $runtime_vars, $locale )
 			);
 		}
 
@@ -260,16 +260,15 @@ final class Pipeline {
 	 * Render each `#def` value once and return the frozen results.
 	 *
 	 * Values are rendered in dependency order so a `#def` built out of another `#def` sees the
-	 * resolved text rather than the raw template. Order is discovered by repeated passes: on each
-	 * pass every definition whose value no longer references an unresolved definition is rendered.
-	 * A pass that resolves nothing means what is left is a cycle, and those are rendered anyway —
-	 * `expand_variables()` carries its own depth guard, so a cycle degrades to a bounded expansion
-	 * instead of hanging here.
+	 * resolved text rather than the raw template. `Parser::order_definitions()` works that order
+	 * out, following `#set` aliases as well as direct references — the dependency in
+	 * `#def %b% = %s%` / `#set %s% = %a%` / `#def %a% = …` is real but invisible in `%b%`'s text.
 	 *
 	 * A name that a runtime variable also defines is skipped: runtime outranks locals, so rolling
 	 * it would be work whose result nothing can read.
 	 *
 	 * @param array<string, string> $definitions  Raw `#def` values, name => value.
+	 * @param array<string, string> $set_values   Raw `#set` values, for alias hops in the ordering.
 	 * @param RenderContext         $context      Context with globals, `#set` locals and runtime.
 	 * @param array<string, string> $runtime_vars Runtime variables, which outrank every local.
 	 * @param string                $locale       Plural locale.
@@ -277,49 +276,22 @@ final class Pipeline {
 	 */
 	private function roll_definitions(
 		array $definitions,
+		array $set_values,
 		RenderContext $context,
 		array $runtime_vars,
 		string $locale
 	): array {
-		$vars     = $context->get_merged_variables();
+		$vars      = $context->get_merged_variables();
 		$outranked = array_change_key_case( $runtime_vars, CASE_LOWER );
-		$pending   = array();
 		$resolved  = array();
 
-		foreach ( $definitions as $name => $value ) {
-			if ( array_key_exists( strtolower( $name ), $outranked ) ) {
+		foreach ( $this->parser->order_definitions( $definitions, $set_values ) as $name ) {
+			if ( array_key_exists( $name, $outranked ) ) {
 				continue;
 			}
-			$pending[ $name ] = $value;
-		}
 
-		while ( ! empty( $pending ) ) {
-			$progressed = false;
-
-			foreach ( $pending as $name => $value ) {
-				foreach ( array_keys( $pending ) as $unresolved ) {
-					if ( false !== stripos( $value, '%' . $unresolved . '%' ) ) {
-						continue 2;
-					}
-				}
-
-				$resolved[ $name ] = $this->render_definition_value(
-					$value,
-					array_merge( $vars, $resolved ),
-					$locale
-				);
-				unset( $pending[ $name ] );
-				$progressed = true;
-			}
-
-			if ( ! $progressed ) {
-				break;
-			}
-		}
-
-		foreach ( $pending as $name => $value ) {
 			$resolved[ $name ] = $this->render_definition_value(
-				$value,
+				$definitions[ $name ],
 				array_merge( $vars, $resolved ),
 				$locale
 			);
