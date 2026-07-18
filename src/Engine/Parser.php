@@ -43,6 +43,16 @@ class Parser {
 	public const DIRECTIVE_PATTERN = '/^[ \t]*#(set|def)[ \t]+%(\w+)%[ \t]*=[ \t]*(.*?)[ \t]*$/mu';
 
 	/**
+	 * The same grammar narrowed to `#set`, for `extract_set_directives()` alone.
+	 *
+	 * It cannot be expressed as a filter over `DIRECTIVE_PATTERN`, because that method must leave
+	 * `#def` lines **in the body** rather than strip lines it will not resolve. Kept adjacent to
+	 * the constant it mirrors so the two cannot drift apart unnoticed — which is exactly what
+	 * happened when four near-copies of this were spread across the parser and the validator.
+	 */
+	public const SET_DIRECTIVE_PATTERN = '/^[ \t]*#set[ \t]+%(\w+)%[ \t]*=[ \t]*(.*?)[ \t]*$/mu';
+
+	/**
 	 * A `%var%` reference. Shared by expansion and by `#def` dependency discovery, so the two
 	 * cannot disagree about what counts as a reference.
 	 */
@@ -145,7 +155,7 @@ class Parser {
 		$variables = array();
 
 		$body = (string) preg_replace_callback(
-			'/^[ \t]*#set[ \t]+%(\w+)%[ \t]*=[ \t]*(.*?)[ \t]*$/mu',
+			self::SET_DIRECTIVE_PATTERN,
 			static function ( array $m ) use ( &$variables ): string {
 				$variables[ strtolower( $m[1] ) ] = $m[2];
 				return '';

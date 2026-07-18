@@ -66,7 +66,30 @@ existing templates mean. Ships in lockstep with the WordPress plugin 3.0.0, `@sp
 
 - **`Parser::extract_directives()`** returns body, `set`, `def`, and an `occurrences` list that
   preserves every directive line with its number. The maps flatten duplicates; a validator cannot
-  report a collision it can no longer see. `extract_set_directives()` remains as a wrapper.
+  report a collision it can no longer see. `extract_set_directives()` remains, `#set`-only.
+
+- **Validator diagnostics for the new directive.** `#def` is now recognised everywhere `#set` was:
+  malformed-directive reporting, the definitions map behind self-reference and cycle detection, and
+  the known-names set (a `#def`-defined name used to warn "may be a runtime variable" at every
+  reference). Plus three new checks:
+  - **a name defined more than once** is an error, by either directive and in any combination. Two
+    `#set` lines sharing a name were silently last-wins before this;
+  - **`#include` inside a `#def` value** is an error — includes resolve after the value is frozen.
+    Inside a `#set` it is fine, because a macro is substituted verbatim and the include reaches the
+    include stage in the body;
+  - **a macro in a plural count slot** is an error: the count is still unresolved spintax when the
+    plural is decided, so the block renders empty. Taint propagates to a fixed point through `#set`
+    chains, so `#set %m% = {1|4|9}` / `#set %n% = %m%` / `{plural %n%: …}` is caught even though
+    `%n%` holds no bracket. Known limit: the validator receives global variable *names*, never their
+    values, so taint cannot cross a global.
+
+### Changed (advice)
+
+- **"Extract via `#set` first" became wrong and is now "extract via `#def` first."** The advice
+  appears in `PluralFormError`, in the `Plurals` docblock and in the runtime message a broken form
+  slot raises. Under collapse-once a `#set` froze to literal text and the advice worked; under a
+  macro the value is substituted verbatim and puts the brackets straight back into the form,
+  raising the very error it was meant to avoid. Verified both ways before rewording.
 
 ### Migration
 
