@@ -283,9 +283,15 @@ final class Pipeline {
 		// The alias map is every macro value a definition can actually see — globals and runtime
 		// variables as well as local `#set`. Passing only the local map would miss a dependency
 		// routed through a global: `#def %b% = %s%` with a global `%s% = %a%` and a local
-		// `#def %a%`. Definition names themselves are excluded, because a `#def` shadows a global
-		// of the same name and hopping through the shadowed value would compute the wrong graph.
-		$aliases = array_diff_key( $vars, $definitions );
+		// `#def %a%`.
+		//
+		// Excluded from it are the definitions that will actually be rolled, because a `#def`
+		// shadows a global of the same name and hopping through the shadowed value would compute
+		// the wrong graph. A definition a runtime variable outranks is NOT excluded: it is never
+		// rolled, so the runtime value is the one that will really be substituted, and the graph
+		// has to follow it. Excluding those too made a dependency reached through such a name
+		// invisible, and declaration order leaked back into the result.
+		$aliases = array_diff_key( $vars, array_diff_key( $definitions, $outranked ) );
 
 		foreach ( $this->parser->order_definitions( $definitions, $aliases ) as $name ) {
 			if ( array_key_exists( $name, $outranked ) ) {
@@ -323,6 +329,13 @@ final class Pipeline {
 
 		$value = $this->conditionals->apply( $value, $vars );
 		$value = $this->parser->expand_variables( $value, $vars );
+
+		// Shield again, for the same reason the body does: expansion is the one place a host
+		// construct can enter after the first pass. `#def %frag% = %s%` with
+		// `#set %s% = [host id="1"]` pulls it in here, and without this the permutation resolver
+		// below reads it as a single-element permutation and strips the brackets.
+		$value = $this->shield_host_constructs( $value, $shielded, $counter );
+
 		$value = $this->conditionals->apply( $value, $vars );
 		$value = $this->plurals->apply( $value, $locale, array( 'lenient' => true ) );
 		$value = $this->parser->resolve_enumerations( $value );

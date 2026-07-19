@@ -112,10 +112,17 @@ final class ValidatorDirectivesTest extends TestCase {
 	 */
 	public function tainted_counts(): array {
 		return array(
-			'direct enumeration'  => array( "#set %n% = {1|4|9}\n{plural %n%: a|b}" ),
-			'direct permutation'  => array( "#set %n% = [1|2]\n{plural %n%: a|b}" ),
-			'one hop'             => array( "#set %m% = {1|4|9}\n#set %n% = %m%\n{plural %n%: a|b}" ),
-			'three hops'          => array( "#set %a% = {1|2}\n#set %b% = %a%\n#set %c% = %b%\n{plural %c%: x|y}" ),
+			'direct enumeration'       => array( "#set %n% = {1|4|9}\n{plural %n%: a|b}" ),
+			'direct permutation'       => array( "#set %n% = [1|2]\n{plural %n%: a|b}" ),
+			'one hop'                  => array( "#set %m% = {1|4|9}\n#set %n% = %m%\n{plural %n%: a|b}" ),
+			'three hops'               => array( "#set %a% = {1|2}\n#set %b% = %a%\n#set %c% = %b%\n{plural %c%: x|y}" ),
+			// Enumeration nested inside a conditional: the conditional resolves in time, the
+			// enumeration it uncovers does not.
+			'enumeration in a branch'  => array( "#set %flag% = 1\n#set %n% = {?flag?{1|4}|2}\n{plural %n%: a|b}" ),
+			// A nested plural resolves in the SAME pass as the outer block, not before it, so the
+			// outer count is still spintax when it is read. Exempting `{plural ` alongside `{?`
+			// was a regression; this is the case that caught it.
+			'a nested plural'          => array( "#set %n% = {plural 1:1|2}\n{plural %n%: a|b}" ),
 		);
 	}
 
@@ -135,6 +142,9 @@ final class ValidatorDirectivesTest extends TestCase {
 			'a literal #set'                             => array( "#set %n% = 5\n{plural %n%: a|b}" ),
 			'no variable at all'                         => array( '{plural 5: a|b}' ),
 			'a def one hop away'                         => array( "#def %m% = {1|2}\n#def %n% = %m%\n{plural %n%: a|b}" ),
+			// A conditional resolves at stage 6c, before plurals at 6d, so the count IS a literal
+			// when it is read. This template renders correctly and must not be flagged.
+			'a conditional'                              => array( "#set %flag% = 1\n#set %n% = {?flag?1|2}\n{plural %n%: a|b}" ),
 		);
 	}
 

@@ -111,7 +111,12 @@ class Parser {
 		// is the same contract the full pipeline implements, minus the two passes this method does
 		// not run at all (conditionals and plurals): a value carrying those is frozen with them
 		// unresolved. Callers needing the whole language want `Spintax\Core\Render\Pipeline`.
-		$aliases = array_diff_key( array_change_key_case( $all_vars, CASE_LOWER ), $extracted['def'] );
+		// Excluded are the definitions that will actually be rolled; one the caller overrides is
+		// left in, because the caller's value is what gets substituted and the graph must follow it.
+		$aliases = array_diff_key(
+			array_change_key_case( $all_vars, CASE_LOWER ),
+			array_diff_key( $extracted['def'], $caller )
+		);
 
 		foreach ( $this->order_definitions( $extracted['def'], $aliases ) as $name ) {
 			if ( array_key_exists( $name, $caller ) ) {

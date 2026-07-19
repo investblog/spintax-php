@@ -394,6 +394,9 @@ final class PipelineTest extends TestCase {
 			'through a #def'      => array( "#def %x% = [host id=\"1\"]\n%x%", array() ),
 			'through a #set'      => array( "#set %x% = [host id=\"1\"]\n%x%", array() ),
 			'through a global'    => array( '%g%', array( 'g' => '[host id="1"]' ) ),
+			// Enters during the roll's own variable expansion — a second entrance that shielding
+			// only at the start of the roll does not cover.
+			'into a #def via #set' => array( "#set %s% = [host id=\"1\"]\n#def %x% = %s%\n%x%", array() ),
 		);
 	}
 

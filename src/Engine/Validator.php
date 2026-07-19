@@ -13,6 +13,25 @@ namespace Spintax\Core\Engine;
 class Validator {
 
 	/**
+	 * Spintax that is still unresolved when plural agreement runs.
+	 *
+	 * Stage order decides this, not bracket type. Conditionals resolve at 6c, *before* plurals at
+	 * 6d, so a `{?…}` in a count value is already a literal by the time the count is read —
+	 * flagging it would be a false positive on a template that renders correctly. Enumerations
+	 * (stage 7) and permutations (stage 8) run *after* plurals and are the real hazard.
+	 *
+	 * A conditional is therefore the only exemption. A nested `{plural …}` is **not**: it resolves
+	 * in the same pass as the outer block, not before it, so `#set %n% = {plural 1:1|2}` used as a
+	 * count leaves the outer construct holding unresolved spintax and it degrades to fullwidth
+	 * braces. Exempting it here was a real regression — introduced by narrowing this rule for the
+	 * conditional case and caught in review.
+	 *
+	 * The lookahead still catches an enumeration nested *inside* a conditional —
+	 * `{?flag?{1|4}|2}` — where the inner `{1|` matches and the block genuinely does render empty.
+	 */
+	private const UNRESOLVED_AT_PLURAL_TIME = '/\[|\{(?!\?)/u';
+
+	/**
 	 * Shared parser, used for its grammar rather than for rendering.
 	 *
 	 * Every directive-shaped question — what is a directive, what does it define, where — is
@@ -353,7 +372,7 @@ class Validator {
 		$tainted = array();
 
 		foreach ( $macros as $name => $value ) {
-			if ( 1 === preg_match( '/[{\[]/', $value ) ) {
+			if ( 1 === preg_match( self::UNRESOLVED_AT_PLURAL_TIME, $value ) ) {
 				$tainted[ $name ] = true;
 			}
 		}
