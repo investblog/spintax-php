@@ -6,7 +6,7 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
-## Unreleased
+## 0.3.0 — 2026-07-19
 
 `#set` goes back to being a macro, and `#def` carries roll-once. Breaking: it changes what
 existing templates mean. Ships in lockstep with the WordPress plugin 3.0.0, `@spintax/core`
@@ -62,7 +62,7 @@ existing templates mean. Ships in lockstep with the WordPress plugin 3.0.0, `@sp
   This is where a plural counter now lives: `#def %n% = {1|4|9}` followed by
   `{plural %n%: …}` prints and agrees the same number. Under `#set` the two disagree — the count
   slot still holds `{1|4|9}` when the plural pass runs — and that is the accepted consequence of a
-  macro, pinned by a test and reported by the forthcoming `plural.count-macro` diagnostic.
+  macro, pinned by a test and reported by the validator (see below).
 
 - **`Parser::extract_directives()`** returns body, `set`, `def`, and an `occurrences` list that
   preserves every directive line with its number. The maps flatten duplicates; a validator cannot
