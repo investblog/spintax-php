@@ -720,6 +720,15 @@ class Parser {
 				: strtr( $text, $placeholders );
 		}
 
+		// Final trim. This is a DELIBERATE, documented divergence from the sibling engines, not an
+		// oversight — see spintax-php#2. PHP's default charlist is `" \t\n\r\0\x0B"`: it strips NUL
+		// and does not strip form feed. `@spintax/core` uses `String.prototype.trim` and the Python
+		// port reproduces that same ECMAScript whitespace set on purpose, so both strip form feed
+		// and NBSP and keep a NUL. The three therefore disagree at the very edge, on input carrying
+		// a leading/trailing NUL, form feed or NBSP — none of which real rendered content has. The
+		// call is left as native `trim()`: the decision was to record the divergence rather than
+		// change output, since nothing pins it in the golden corpus and matching the reference would
+		// mean a `preg_replace` over the ECMAScript set here. Revisit if #2 lands a corpus fixture.
 		return trim( $text );
 	}
 
