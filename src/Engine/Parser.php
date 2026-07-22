@@ -452,6 +452,9 @@ class Parser {
 	 * @return string Cleaned-up text.
 	 */
 	public function post_process( string $text ): string {
+		// Whether the CALLER's own text carries a NUL decides how step 12 restores. Read it here,
+		// before the shield mints any of its own — afterwards the two are indistinguishable.
+		$input_has_nul                   = str_contains( $text, "\x00" );
 		$placeholders                    = array();
 		$counter                         = 0;
 		$domain_part                     = '(?:(?:(?:xn--)?[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)\.)+(?:xn--[a-z0-9\-]{2,59}|[\p{L}][\p{L}\p{N}-]{1,62})';
@@ -672,13 +675,34 @@ class Parser {
 			$text
 		);
 
-		// 12. Restore placeholders (reverse order for safety).
+		// 12. Restore placeholders, in insertion order.
+		//
+		// Two restores, and which one runs is a contract question rather than a tuning detail.
+		// `str_replace()` over arrays is SEQUENTIAL: it replaces every occurrence of the first key
+		// throughout the text, then the second, and so on. That is O(text x keys) — the reason this
+		// stage was quadratic — but it is also observable. A replacement can rewrite text an earlier
+		// replacement produced, and an unpaired NUL the CALLER supplied can pair with the opening
+		// NUL of a real placeholder to form a key that was never minted here. One left-to-right pass
+		// reproduces neither effect, so it is NOT a drop-in for the general case.
+		//
+		// When the input carries no NUL of its own, both of those effects are gone: every NUL in the
+		// working text is then one the shield placed, so the tokens are well formed and no shielded
+		// value can hold a NUL to forge another. `strtr()` with a map is the single pass — it takes
+		// the longest key matching at each position and never rescans what it wrote, and here only
+		// one key can ever match, since every key is NUL-delimited with no NUL inside.
+		//
+		// The guard is NOT a proof that the two restores agree, and the comments in the sibling
+		// engines that say so are wrong. One divergence survives it, because placeholder delimiters
+		// are not owned by the token that placed them: between two adjacent shielded constructs,
+		// ordinary caller text can spell a key the shield really minted, and the sequential restore
+		// substitutes it, destroying both real tokens. `https://a.io e.g. URL_0mailto:x@y.io` is
+		// such an input and holds no NUL at all. There is no guard to hide behind there — this
+		// returns what `@spintax/core` returns, which is the single pass. See
+		// `tests/RestoreParityTest.php`, which pins the choice in both directions.
 		if ( ! empty( $placeholders ) ) {
-			$text = str_replace(
-				array_keys( $placeholders ),
-				array_values( $placeholders ),
-				$text
-			);
+			$text = $input_has_nul
+				? str_replace( array_keys( $placeholders ), array_values( $placeholders ), $text )
+				: strtr( $text, $placeholders );
 		}
 
 		return trim( $text );
