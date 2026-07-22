@@ -6,6 +6,53 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## Unreleased
+
+### Fixed
+
+- **The placeholder restore is linear.** Both shields — the post-process one (`\x00URL_0\x00` and
+  friends) and the pipeline's host-construct one (`\x00HOST_0\x00`) — put their placeholders back
+  with one `str_replace()` over arrays. That call is sequential: every occurrence of the first key
+  throughout the text, then the second, and so on. Every shieldable construct mints a key, so on
+  shield-heavy text the key count grows with the input and the cost is O(text x keys).
+
+  Measured on prose carrying every shieldable construct (URL, mailto/tel, email, domain, decimal,
+  abbreviation), repeated to size:
+
+  | input | `post_process()` | `Pipeline::render()`, post-process off |
+  |-------|------------------|----------------------------------------|
+  | 14 KB | 0.013 s → 0.002 s | 0.003 s → 0.001 s |
+  | 59 KB | 0.176 s → 0.007 s | 0.046 s → 0.002 s |
+  | 237 KB | 2.702 s → 0.027 s | 0.538 s → 0.013 s |
+  | 950 KB | 34.4 s → 0.101 s | 9.588 s → 0.045 s |
+
+  Four times the input now costs about four times the work, where it used to cost seven to ten.
+  On a 950 KB render the restore alone was 23.9 s of the 34.4 s; every other pass in the stage
+  together came to 0.065 s, so the restore was the whole of the quadratic term.
+
+  `strtr()` with the map is the same restore in one left-to-right pass. It is NOT a drop-in for
+  the general case, and the code says so: a sequential replace can rewrite text an earlier
+  replacement produced, and a NUL the caller supplied can pair with a real placeholder's delimiter
+  into a key that was never minted. Both stages therefore keep the sequential restore whenever a
+  NUL reaches the working text from outside the shield — for the pipeline that includes one
+  arriving through a `#set`, a global, a runtime variable or a frozen `#def`, since expansion is
+  the one place new text enters after the first shield.
+
+- **Behaviour change in one corner, and it is deliberate.** Placeholder delimiters are not owned by
+  the token that placed them: between two adjacent shielded constructs, ordinary caller text can
+  spell a key the shield really minted, and the sequential restore substitutes it — destroying both
+  real tokens. `https://a.io e.g. URL_0mailto:x@y.io` used to render as
+  `https://a.io \x00ABBR_2https://a.ioURI_1` and now renders unchanged. **No NUL in the input is
+  required for this**, so the NUL guard above does not cover it and the engine has to choose. It
+  restores as `@spintax/core` does — the reference takes the single pass here too — which moves
+  this package onto the reference's answer rather than away from it. The golden corpus covers
+  neither shape; `tests/RestoreParityTest.php` now does, in both directions.
+
+- **A stale comment.** Step 12 was labelled "reverse order for safety". `array_keys()` preserves
+  insertion order and nothing was ever reversed — and since replacement order is exactly what makes
+  this stage observable, the comment was worse than noise. Insertion order is the contract, and the
+  code now says that.
+
 ## 0.3.0 — 2026-07-19
 
 `#set` goes back to being a macro, and `#def` carries roll-once. Breaking: it changes what
