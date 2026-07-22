@@ -6,7 +6,10 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
-## Unreleased
+## 0.3.1 — 2026-07-23
+
+Post-process parity with `@spintax/core` 0.3.2: no leaked U+0000 sentinel, and a linear placeholder
+restore. Reimplemented from the shared behaviour contract and the golden corpus, not transcribed.
 
 ### Fixed
 
@@ -64,8 +67,9 @@ no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing th
   `https://a.io \x00ABBR_2https://a.ioURI_1` and now renders unchanged. **No NUL in the input is
   required for this**, so the NUL guard above does not cover it and the engine has to choose. It
   restores as `@spintax/core` does — the reference takes the single pass here too — which moves
-  this package onto the reference's answer rather than away from it. The golden corpus covers
-  neither shape; `tests/RestoreParityTest.php` now does, in both directions.
+  this package onto the reference's answer rather than away from it. The golden corpus now pins this
+  shape too (`postprocess/adjacent-placeholders-around-a-key-name`, investblog/spintax-js#54), so
+  the family is gated on it rather than split; `tests/RestoreParityTest.php` covers both directions.
 
 - **A stale comment.** Step 12 was labelled "reverse order for safety". `array_keys()` preserves
   insertion order and nothing was ever reversed — and since replacement order is exactly what makes
