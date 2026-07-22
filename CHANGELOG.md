@@ -10,6 +10,25 @@ no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing th
 
 ### Fixed
 
+- **`post_process()` no longer emits its own U+0000 sentinel into output**, on input carrying
+  none. A URI body runs to the first delimiter, so the URL rule and the `mailto:`/`tel:` rule
+  overlap whenever one URI carries the other's scheme. Shielding them in two passes let the second
+  run into a placeholder the first had minted:
+  `mailto:sales@example.com?body=see%20https://shop.example.com/cart` shielded the URL first, then
+  stored a `mailto:` value with `URL_0`'s key inside it. The restore is past that key by the time
+  the value lands, so the engine returned a literal `\x00URL_0\x00`.
+
+  That output is invalid text — illegal in XML, U+FFFD to an HTML parser, rejected by Postgres
+  `text` — and the token becomes a live key again as soon as an edit detaches it from the prefix
+  that was shielding it, so a later render substitutes an unrelated URL into a contact link.
+
+  Both schemes now shield in ONE alternation, so the leftmost match takes the whole token.
+  Reordering the two passes is not equivalent and was rejected upstream after measuring: it only
+  moves the damage onto a URL whose path carries a `mailto:`. NUL also leaves the URI body class,
+  for a caller-supplied one. Mirrors `@spintax/core` (investblog/spintax-js#53); the golden corpus
+  gates it with three fixtures, the third a negative case that fails under the ordering fix and
+  passes under this one.
+
 - **The placeholder restore is linear.** Both shields — the post-process one (`\x00URL_0\x00` and
   friends) and the pipeline's host-construct one (`\x00HOST_0\x00`) — put their placeholders back
   with one `str_replace()` over arrays. That call is sequential: every occurrence of the first key

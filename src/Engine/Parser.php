@@ -479,23 +479,38 @@ class Parser {
 			return $store_placeholder( $value, $prefix );
 		};
 
-		// 1. Shield: full URLs (with protocol).
+		// 1. Shield URIs — `https?`/`ftp` (with a `//` authority) and `mailto:`/`tel:` (without
+		// one) — in ONE pass, deliberately, and before the email/domain passes so the whole
+		// `mailto:` survives instead of the address being carved out from under its prefix,
+		// leaving a bare 'mailto:' whose colon then gets a space injected (spintax-js#41).
+		//
+		// They used to be two passes, URLs then `mailto:`/`tel:`. A URI body runs to the first
+		// delimiter, so the two match sets overlap whenever one URI carries the other's scheme,
+		// and with two passes the second one runs into a placeholder the first already minted:
+		// `mailto:sales@x.com?body=see%20https://shop.x.com/cart` shielded the URL first, then
+		// stored a `mailto:` value with URL_0's key inside it. The restore is past that key by
+		// the time the value lands, so the engine emitted a raw U+0000 — illegal in XML, U+FFFD
+		// to an HTML parser, rejected by Postgres `text`, and a live key again as soon as an edit
+		// detaches it from the prefix that was shielding it (spintax-js#53).
+		//
+		// Neither pass order fixes it, because whichever runs second is the one that gets split:
+		// shielding `mailto:` first only moves the damage onto a URL whose path carries a
+		// `mailto:`, where the leading half then loses its trailing dot to the punctuation pass
+		// (`https://x.io/a.mailto:…` becomes `https://x.io/a. mailto:…`). One alternation has no
+		// second pass to damage: the leftmost match wins and takes the whole token.
+		//
+		// NUL stays out of the body class regardless. Nothing is shielded yet when this pass
+		// runs, so on ordinary input it never bites; it is there for a caller-supplied NUL, which
+		// would otherwise let a URI match run through the delimiters of a placeholder minted
+		// after it.
 		$text = preg_replace_callback(
-			'~(?:https?|ftp)://[^\s<>"\')\]]+~iu',
+			'~(?:(?:https?|ftp)://|(?:mailto|tel):)[^\x00\s<>"\')\]]+~iu',
 			static function ( array $m ) use ( $store_with_trailing_punctuation ): string {
-				return $store_with_trailing_punctuation( $m[0], 'URL' );
-			},
-			$text
-		);
+				// URL and URI stay distinct prefixes even though one pass mints both — they are
+				// what the other engines' fixtures and the restore's token shape speak.
+				$prefix = preg_match( '~^(?:mailto|tel):~iu', $m[0] ) ? 'URI' : 'URL';
 
-		// 1b. Shield: mailto:/tel: URIs (no // authority, so step 1 misses them).
-		// Must run before the email/domain passes — otherwise the address is
-		// carved out from under the prefix, leaving a bare 'mailto:'/'tel:' whose
-		// colon then gets a space injected, producing a malformed link.
-		$text = preg_replace_callback(
-			'~(?:mailto|tel):[^\s<>"\')\]]+~iu',
-			static function ( array $m ) use ( $store_with_trailing_punctuation ): string {
-				return $store_with_trailing_punctuation( $m[0], 'URI' );
+				return $store_with_trailing_punctuation( $m[0], $prefix );
 			},
 			$text
 		);
