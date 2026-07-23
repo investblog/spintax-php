@@ -129,9 +129,10 @@ to fight.
 
 ## Also available
 
-- **WordPress:** [Spintax](https://wordpress.org/plugins/spintax/) — templates, ACF / post-meta bindings, WooCommerce product context, WP-CLI.
 - **JavaScript / TypeScript:** [`@spintax/core`](https://www.npmjs.com/package/@spintax/core).
-- **OpenCart 3.x:** [Spintax SEO](https://github.com/investblog/spintax-opencart).
+- **Python:** [`spintax-core`](https://pypi.org/project/spintax-core/).
+- **Object Pascal:** [spintax-win](https://github.com/investblog/spintax-win) — Free Pascal, MIT, zero deps.
+- **WordPress:** [Spintax](https://wordpress.org/plugins/spintax/) — templates, ACF / post-meta bindings, WooCommerce product context, WP-CLI.
 - **Docs & playground:** [spintax.net](https://spintax.net).
 
 ## License
