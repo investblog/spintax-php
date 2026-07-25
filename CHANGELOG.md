@@ -6,6 +6,25 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## Unreleased
+
+### Fixed
+
+- **`#include` recognition matches the family rule exactly** (investblog/spintax-js#55). The
+  directive was matched with `/^[ \t]*#include\s+"([^"]+)"\s*$/mu`, and under the `u` modifier
+  PCRE2 turns on UCP: that `\s` matched U+0085, U+00A0 and all of `\p{Z}`, so
+  `#include<NBSP>"x"` was an include here and plain text to every other engine in the family —
+  and since `include.unknown-target` is an error, the widened class moved *verdicts*. The `/m`
+  anchors leaned the other way: PCRE breaks lines on `\n` alone, the reference also on `\r`,
+  U+2028 and U+2029, so an `#include` after a bare CR was plain text here and an include there.
+  Both halves are now spelled out in `Parser::INCLUDE_PATTERN` — the gap is the six ASCII
+  whitespace characters, the anchors are the four ECMAScript line terminators. Measured against
+  `@spintax/core` over a 33-character whitespace/terminator alphabet (165 shaped cases) and
+  60 000 include-shaped differential inputs: zero divergences; the previous pattern diverged on
+  4 241 of them. The golden corpus now pins the rule (`extract/include-*`), so no port decides
+  it by reading again. Templates whose includes use ordinary spaces, tabs or newlines are
+  unaffected.
+
 ## 0.3.1 — 2026-07-23
 
 Post-process parity with `@spintax/core` 0.3.2: no leaked U+0000 sentinel, and a linear placeholder
