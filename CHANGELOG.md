@@ -10,6 +10,29 @@ no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing th
 
 ### Fixed
 
+- **The directive grammar matches the family rule exactly** (investblog/spintax-js#56) — the
+  same two dialect axes as the `#include` fix below, cutting across `#set`/`#def`, `%var%`
+  references, the validator's conditional-ref collector, and the `#include`-in-a-`#def`-value
+  check:
+  - **Names are ASCII `[A-Za-z0-9_]` by contract, not `\w`.** Under `/u` PCRE2 turns on UCP, so
+    `#set %имя% = X` was a valid, *expanding* directive here while every other engine reported a
+    malformed-directive error for the same line — opposite verdicts — and `%Имя%` expanded from
+    context here while staying literal text everywhere else.
+  - **The `/m` anchors are spelled out as lookarounds** over the four ECMAScript line
+    terminators: a directive after a bare CR, U+2028 or U+2029 now exists here too.
+  - **A CRLF line's `\r` no longer leaks into the value.** PCRE's `.` excludes only `\n` and its
+    `$` sits before `\n`, so `#set %a% = X` followed by CRLF captured the value `"X\r"` — every
+    value on a Windows-authored template carried a trailing CR. The value class now excludes all
+    four terminators and the tail carries the reference's explicit `\r?`.
+  - The validator's `#include\b` (Unicode `\b` under UCP) missed `#includeя` in a `#def` value;
+    it is now the ASCII lookahead `#include(?![A-Za-z0-9_])`, and the conditional-ref collector's
+    name tail is ASCII, mirroring `Conditionals::NAME_RE`.
+
+  Measured against `@spintax/core` on a 19-case shaped probe (13 divergent before, 0 after) and a
+  60 000-input directive-shaped differential fuzz over sets, defs and full pipeline render
+  (0 divergences; 126 inputs hit the circular-expansion guard, a separate policy question filed
+  upstream). Templates whose directives use ASCII names and ordinary line endings are unaffected.
+
 - **`#include` recognition matches the family rule exactly** (investblog/spintax-js#55). The
   directive was matched with `/^[ \t]*#include\s+"([^"]+)"\s*$/mu`, and under the `u` modifier
   PCRE2 turns on UCP: that `\s` matched U+0085, U+00A0 and all of `\p{Z}`, so
