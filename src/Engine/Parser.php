@@ -371,13 +371,26 @@ class Parser {
 	}
 
 	/**
-	 * Expand %var% references iteratively until none remain.
+	 * Expand %var% references iteratively until none remain — or the budget runs out.
+	 *
+	 * When the budget runs out, the text is returned AS IS: partial expansion, the
+	 * still-unresolved reference left literal. This used to throw, which broke the
+	 * family's render contract — render never throws on template content, and a
+	 * circular `#set` IS content (the validator reports it; a host that renders
+	 * without validating must still get text). Measured against the reference and
+	 * the Python engine on self-cycles, mutual cycles, literal-accumulating knots
+	 * and 50/51/52-deep chains: identical output on every shape
+	 * (investblog/spintax-js#57).
+	 *
+	 * The loop runs `<=` MAX_VARIABLE_DEPTH — 51 passes, not 50. The reference
+	 * counts RECURSION depth 0..50 inclusive, one substitution per level, so its
+	 * hop budget is 51; for this textual fixpoint the two are equivalent shape for
+	 * shape, and the mutual cycle `%a%↔%b%` is the parity witness: an odd budget
+	 * leaves `%b%` (the reference's answer), an even one leaves `%a%`.
 	 *
 	 * @param string $text     Text with %var% references.
 	 * @param array  $variables name => raw value (names without %).
 	 * @return string Text with variables expanded.
-	 *
-	 * @throws \RuntimeException If circular/deep variable expansion detected.
 	 */
 	public function expand_variables( string $text, array $variables ): string {
 		// Normalise variable keys to lowercase.
@@ -386,7 +399,7 @@ class Parser {
 			$normalised[ strtolower( $k ) ] = $v;
 		}
 
-		for ( $i = 0; $i < self::MAX_VARIABLE_DEPTH; $i++ ) {
+		for ( $i = 0; $i <= self::MAX_VARIABLE_DEPTH; $i++ ) {
 			$changed = false;
 			$text    = preg_replace_callback(
 				self::VARIABLE_PATTERN,
@@ -402,13 +415,11 @@ class Parser {
 			);
 
 			if ( ! $changed ) {
-				return $text;
+				break;
 			}
 		}
 
-		throw new \RuntimeException(
-			'Variable expansion exceeded maximum depth (' . self::MAX_VARIABLE_DEPTH . '). Possible circular reference.'
-		);
+		return $text;
 	}
 
 	/**

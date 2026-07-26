@@ -8,6 +8,20 @@ no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing th
 
 ## Unreleased
 
+### Changed
+
+- **`render()` no longer throws on a circular `#set`** (investblog/spintax-js#57). A
+  self- or mutually-referencing definition — invalid to every validator in the family, but
+  render is contractually lenient on template content — used to escape
+  `Pipeline::render()` as a `RuntimeException` from the variable-expansion depth guard. The
+  guard now stops instead of throwing: expansion ends at the budget and the still-unresolved
+  reference stays literal in the output, exactly as the reference and the Python engine
+  behave (measured shape for shape, including the mutual cycle's odd/even parity and the
+  literal-accumulating knot; the budget is 51 hops — the reference counts recursion depth
+  0..50 inclusive). A host that renders without validating first now always gets text.
+  Hosts that caught this exception will no longer see it — that is the aligned contract,
+  and why this is a Changed, not a Fixed. Five golden-corpus fixtures pin the behaviour.
+
 ### Fixed
 
 - **The directive grammar matches the family rule exactly** (investblog/spintax-js#56) — the
