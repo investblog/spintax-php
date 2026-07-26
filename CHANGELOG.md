@@ -6,7 +6,14 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
-## Unreleased
+## 0.4.0 — 2026-07-26
+
+The release where the recognition rules stopped being *readings* and became the machine-checked
+family contract: `#include`, the `#set`/`#def` grammar, `%var%` references and the expansion
+stop are now pinned by shared golden-corpus fixtures that all three engines run, after a
+differential campaign against `@spintax/core` (165 + 19 shaped cases, two 60 000-input fuzzes —
+all 0-divergent at the end). Minor, not patch: verdicts move for non-ASCII names and exotic
+whitespace, and one exception leaves the API.
 
 ### Changed
 

@@ -1,0 +1,76 @@
+name: Release
+
+# Tag-driven. Packagist needs no upload — it mirrors git tags — so this workflow's job is
+# different: a tag can be placed on any commit, including one CI never saw green, and
+# Packagist will serve it anyway. Re-running the full gate against the tagged commit means
+# a bad tag is at least LOUD, and the annotation becomes the GitHub release so the note
+# written at decision time is the note that ships.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.0', '8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same contract as CI: the corpus is checked out, not vendored — a copy would
+      # drift, and a drifting contract is not a contract.
+      - name: Check out the golden corpus
+        uses: actions/checkout@v4
+        with:
+          repository: investblog/spintax-js
+          path: .corpus
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring
+          coverage: none
+          tools: composer
+
+      - name: Install dependencies
+        run: composer install --no-progress --prefer-dist
+
+      - name: Test
+        run: vendor/bin/phpunit
+        env:
+          SPINTAX_FIXTURES: ${{ github.workspace }}/.corpus/packages/conformance/fixtures
+
+  # The release note is already written — it is the annotation on the tag, composed at
+  # the moment the release was decided. Publish it as a GitHub release rather than have
+  # it retyped by hand. Runs after verify, so a release never announces a red artifact.
+  announce:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag ANNOTATION lives in the tag object, which a shallow checkout of the
+          # commit does not bring along.
+          fetch-depth: 0
+
+      - name: Publish the GitHub release from the tag annotation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          title=$(git tag -l --format='%(contents:subject)' "$TAG")
+          body=$(git tag -l --format='%(contents:body)' "$TAG")
+          link="On Packagist: https://packagist.org/packages/spintax/core#${TAG}"
+          if [ -n "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+            gh release create "$TAG" --title "${title:-$TAG}" --notes "$(printf '%s\n\n%s\n' "$body" "$link")"
+          else
+            gh release create "$TAG" --title "${title:-$TAG}" --generate-notes --notes "$link"
+          fi
