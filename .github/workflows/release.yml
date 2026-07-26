@@ -55,7 +55,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      # checkout@v7, not @v4: v4 fetches the pushed tag PEELED — a lightweight local tag
+      # pointing at the commit — so %(contents:subject) silently falls back to the commit
+      # message. Paid for on v0.4.0, whose release had to be re-titled by hand; the Python
+      # engine's identical job on @v7 never had the problem.
+      - uses: actions/checkout@v7
         with:
           # The tag ANNOTATION lives in the tag object, which a shallow checkout of the
           # commit does not bring along.
