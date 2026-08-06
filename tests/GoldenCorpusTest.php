@@ -123,21 +123,27 @@ final class GoldenCorpusTest extends TestCase {
 		$expect   = $c['expect'];
 		$asserted = false;
 
+		// Every real entry point (Parser::parse, Validator::validate, Pipeline) strips
+		// /# … #/ comments BEFORE extracting directives. This harness drives the extraction
+		// primitives directly, so it replicates that order itself — on the raw template a
+		// commented-out #set/#include would be reported, which no public surface does.
+		$text = $parser->strip_comments( $c['template'] );
+
 		if ( array_key_exists( 'sets', $expect ) ) {
-			$sets = array_keys( $parser->extract_set_directives( $c['template'] )['variables'] );
+			$sets = array_keys( $parser->extract_set_directives( $text )['variables'] );
 			$this->assertSameSet( $expect['sets'], $sets, "sets for {$c['id']}" );
 			$asserted = true;
 		}
 		if ( array_key_exists( 'includes', $expect ) ) {
 			$includes = array_map(
 				static fn( array $d ): string => $d['slug'],
-				$parser->find_include_directives( $c['template'] )
+				$parser->find_include_directives( $text )
 			);
 			$this->assertSameSet( $expect['includes'], $includes, "includes for {$c['id']}" );
 			$asserted = true;
 		}
 		if ( array_key_exists( 'refs', $expect ) ) {
-			$body = $parser->extract_set_directives( $c['template'] )['body'];
+			$body = $parser->extract_set_directives( $text )['body'];
 			$this->assertSameSet( $expect['refs'], $this->extractRefs( $body ), "refs for {$c['id']}" );
 			$asserted = true;
 		}

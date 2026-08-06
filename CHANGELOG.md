@@ -6,6 +6,17 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## Unreleased
+
+### Fixed
+
+- **The malformed-directive check trims spaces and tabs only** (the reference's `/^[ \t]+/`).
+  A bare `ltrim()` also eats NUL, VT and CR, so `NUL + "#set broken"` was reported
+  `set.malformed` — a valid template called invalid, on a check whose split (`\n` alone)
+  was already the reference's. Caught by the new golden-corpus
+  `validate/directive-check-*` fixtures, which pin the trim class, the LF-only line split
+  and the mid-line-CR directive survivor across all engines.
+
 ## 0.4.0 — 2026-07-26
 
 The release where the recognition rules stopped being *readings* and became the machine-checked
