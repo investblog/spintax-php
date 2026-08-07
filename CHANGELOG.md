@@ -6,6 +6,31 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.5.1 — 2026-08-07
+
+`validate()` scales. No output changes anywhere — a 464-document differential (definition
+graphs, plural taint, fuzz, an options matrix) is byte-identical before and after, and two
+deliberate mutations each turn it red.
+
+### Fixed
+
+- **`validate()` is no longer super-linear on definition graphs — and no longer hangs.** The
+  circular-reference walk re-ran `preg_match_all` on every value at every visit, tested the
+  path with `in_array`, copied it with `array_merge` per step, and restarted from every
+  definition with no memory of silent subtrees — on a converging diamond that re-explored
+  shared subtrees exponentially, so ~1.5 KB of template pinned a CPU indefinitely (a
+  denial-of-service shape for any host exposing validate). Measured on PHP 8.2, same
+  machine: a chain of 1600 `#set`s 15.2 s → 61 ms; a 20-level converging diamond 3.5 s →
+  26 ms; 26 levels killed at 20 s → 23 ms; one cycle of 1600 killed at 20 s → 1.7 s (that
+  remainder is the size of the answer — every message carries the full cycle path). The
+  plural-taint fixed point became a reverse-edge worklist computing the same closure.
+  References parse once, the walk is iterative with the path as a hash set, and one colour
+  walk computes up front which names can reach a cycle — a subtree that cannot reach one
+  cannot report, so pruning it is output-neutral by construction. Emission order, count and
+  messages are exactly the recursive walk's, duplicated edges and all. Same fix as
+  `@spintax/core` 0.3.3; the emission-semantics questions it surfaced are
+  [spintax-js#59](https://github.com/investblog/spintax-js/issues/59).
+
 ## 0.5.0 — 2026-08-07
 
 A one-change release, minor by this repo's rule that a verdict move is never a patch:
