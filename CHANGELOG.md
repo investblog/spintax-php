@@ -6,16 +6,23 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
-## Unreleased
+## 0.5.0 — 2026-08-07
 
-### Fixed
+A one-change release, minor by this repo's rule that a verdict move is never a patch:
+templates that a bare `ltrim()` charlist used to condemn are now valid, as they always
+were to the reference.
+
+### Changed
 
 - **The malformed-directive check trims spaces and tabs only** (the reference's `/^[ \t]+/`).
   A bare `ltrim()` also eats NUL, VT and CR, so `NUL + "#set broken"` was reported
   `set.malformed` — a valid template called invalid, on a check whose split (`\n` alone)
-  was already the reference's. Caught by the new golden-corpus
-  `validate/directive-check-*` fixtures, which pin the trim class, the LF-only line split
-  and the mid-line-CR directive survivor across all engines.
+  was already the reference's. A host that relied on the `invalid` verdict for such
+  control-character corners will now see `valid` — that verdict move is why this is a
+  Changed and a minor. Caught by the new golden-corpus `validate/directive-check-*`
+  fixtures, which pin the trim class, the LF-only line split and the mid-line-CR
+  directive survivor across all engines (corpus 234; this engine 224 tests / 259
+  assertions / 1 skip, own suite 307/351/1).
 
 ## 0.4.0 — 2026-07-26
 
