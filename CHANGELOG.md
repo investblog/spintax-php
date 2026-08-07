@@ -6,6 +6,22 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.5.2 — 2026-08-07
+
+The last of the from-offset-0 line counts. No output changes: the 464-document differential
+is byte-identical before and after, and freezing the cursor turns it red at 149 documents.
+
+### Fixed
+
+- **Occurrence line numbers resume instead of recounting.** Four sites computed each item's
+  line with `substr_count( $text, "\n", 0, $offset )` — a fresh scan from the start of the
+  text per directive occurrence (`extract_directives`, which the RENDER path calls too),
+  per `#include` (`find_include_directives`), per permutation config and per plural block
+  (validator). C's `memchr` hid the quadratic term behind small constants, but it was
+  there: 6400 plural blocks 256 ms → 109 ms, 6400 configs 442 ms → 144 ms, 6400 duplicate
+  directives 313 ms → 148 ms. All four loops walk ascending offsets, so a resuming cursor
+  counts every byte once. Same cure as `@spintax/core` 0.3.3's `extractDirectives`.
+
 ## 0.5.1 — 2026-08-07
 
 `validate()` scales. No output changes anywhere — a 464-document differential (definition
