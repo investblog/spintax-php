@@ -6,6 +6,36 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.6.0 — 2026-08-18
+
+A new diagnostic, so minor rather than patch: validation output changes for a `{plural ...}`
+block whose form count is not the render default when no locale was supplied. **No verdict
+moves** — the new code is a warning, and validity still means "no errors".
+
+### Added
+
+- **`plural.locale-missing` — a warning where validation used to be silent.** Mirrors
+  `@spintax/core` (spintax-js#65), reported from a pipeline rendering ~1000 articles per
+  campaign: a three-form plural validated without a locale passed clean and then rendered as
+  the fullwidth-brace fallback `｛plural …｝` into finished text, where downstream checks that
+  scan for `{`/`}` never see it.
+
+  Half of the asymmetry was deliberate and stays: **no locale means no arity verdict**, because
+  the template may well be correct for the locale the host renders with, and failing it here
+  would fail a good template for a fact the caller never claimed. Rendering has no such luxury —
+  it resolves against `Plurals::DEFAULT_ARITY` whatever the caller said — so the warning covers
+  exactly that gap. It fires only when no locale normalizes AND the form count is not the
+  default; a two-form block stays silent.
+
+  `check_plurals()` now returns `array{errors, warnings}` like `check_variable_references()`;
+  the single call site merges both. `Plurals::DEFAULT_ARITY` is a named constant so the
+  validator's claim and the renderer's behaviour cannot drift apart — that drift was the bug.
+
+  Worth knowing about the gate: the shared corpus cannot police this here. Its PHP runner
+  asserts the VERDICT only, because these diagnostics carry human messages rather than machine
+  codes, and a warning does not move a verdict. Both the warning and its ABSENCE on a two-form
+  block are pinned in `PluralsTest` instead.
+
 ## 0.5.2 — 2026-08-07
 
 The last of the from-offset-0 line counts. No output changes: the 464-document differential
