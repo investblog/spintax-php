@@ -105,4 +105,66 @@ final class PluralsTest extends TestCase {
 		$plurals = $this->plurals();
 		$this->assertSame( 3, $plurals->plural_arity( $plurals->normalize_base_lang( $tag ) ) );
 	}
+
+	// ── No locale: no verdict, but not silence either (spintax-js#65) ──────────
+	//
+	// The corpus cannot gate this half. Its PHP runner asserts the VERDICT only —
+	// diagnostics here carry human messages, not machine codes — and a warning by
+	// definition does not move a verdict. So the warning and, more importantly, its
+	// ABSENCE on a 2-form block are pinned here or nowhere.
+
+	private function validate( string $template, string $locale = '' ): array {
+		$validator = new \Spintax\Core\Engine\Validator();
+		return $validator->validate( $template, array(), array(), $locale );
+	}
+
+	public function test_no_locale_warns_when_the_form_count_is_not_the_render_default(): void {
+		$result = $this->validate( '{plural 3: a|b|c}' );
+
+		$this->assertCount( 0, $result['errors'], 'no locale means no VERDICT — the template may be right for the locale it will be rendered with' );
+		$this->assertCount( 1, $result['warnings'] );
+		$this->assertStringContainsString( 'no locale was supplied', $result['warnings'][0]['message'] );
+	}
+
+	public function test_the_warning_agrees_with_what_rendering_actually_does(): void {
+		// The sentence claims the block will not resolve. Check that against the engine
+		// rather than trusting the wording — and against the PLURAL STAGE, not
+		// `Parser::process()`, which by its own docblock runs neither conditionals nor
+		// plurals (a plural block reaching it is eaten by the synonym stage as a 3-way
+		// choice, which is why the first version of this test read `Plural 3: a`).
+		$lenient = array( 'lenient' => true );
+
+		$this->assertStringContainsString(
+			"\u{FF5B}",
+			$this->plurals()->apply( '{plural 3: a|b|c}', '', $lenient ),
+			'the block really does fail to resolve at the default arity'
+		);
+		// The mirror: two forms DO resolve at the default, which is why they get no warning.
+		$this->assertSame( 'many', $this->plurals()->apply( '{plural 3: one|many}', '', $lenient ) );
+	}
+
+	public function test_no_locale_stays_silent_on_a_two_form_block(): void {
+		$result = $this->validate( '{plural 3: one|many}' );
+
+		$this->assertCount( 0, $result['errors'] );
+		$this->assertCount( 0, $result['warnings'], 'the render default resolves a 2-form block, so there is nothing to warn about' );
+	}
+
+	public function test_supplying_a_locale_replaces_the_warning_with_the_real_verdict(): void {
+		$ru = $this->validate( '{plural 3: a|b|c}', 'ru' );
+		$this->assertCount( 0, $ru['errors'] );
+		$this->assertCount( 0, $ru['warnings'] );
+
+		$en = $this->validate( '{plural 3: a|b|c}', 'en' );
+		$this->assertCount( 1, $en['errors'], 'three forms are an arity ERROR for a 2-form locale' );
+		$this->assertCount( 0, $en['warnings'] );
+	}
+
+	public function test_a_structurally_broken_block_reports_only_that(): void {
+		$result = $this->validate( '{plural 3: {a|b}|c|d}' );
+
+		$this->assertCount( 1, $result['errors'] );
+		$this->assertStringContainsString( 'nested spintax brackets', $result['errors'][0]['message'] );
+		$this->assertCount( 0, $result['warnings'], 'no second, invented problem on a block that is already malformed' );
+	}
 }
