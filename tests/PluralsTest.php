@@ -259,4 +259,33 @@ final class PluralsTest extends TestCase {
 			$this->assertStringNotContainsString( 'expected', $error['message'], 'no arity verdict on an unresolvable list' );
 		}
 	}
+
+	/**
+	 * The expansion budget bounds GROWTH, not size.
+	 *
+	 * A ceiling on total length made this "unknowable" and flipped invalid to valid.
+	 * Nothing in the grammar limits how long a form may be; long is not exploding. Not in
+	 * the shared corpus because a 65 KB fixture would be carried by five engines.
+	 */
+	public function test_a_long_plain_form_list_is_still_counted(): void {
+		$result = $this->validate( '{plural 2: one|' . str_repeat( 'x', 65 * 1024 ) . '}', 'ru' );
+
+		$messages = array_column( $result['errors'], 'message' );
+		$this->assertCount( 1, $messages );
+		$this->assertStringContainsString( 'expected', $messages[0] );
+	}
+
+	/**
+	 * 15k self-references: the next generation is hundreds of megabytes.
+	 *
+	 * Measuring the result after building it is measuring too late — the allocation is the
+	 * failure, so the budget is enforced while the pass runs. This test dying is the
+	 * assertion; PHPUnit reports a memory fatal as a failed run.
+	 */
+	public function test_one_expansion_pass_cannot_allocate_past_the_budget(): void {
+		$result = $this->validate( '#set %a% = ' . str_repeat( '%a% ', 15000 ) . "\n{plural 2: one|%a%}", 'en' );
+
+		$messages = implode( ' ', array_column( $result['errors'], 'message' ) );
+		$this->assertStringContainsString( 'itself', $messages, 'the self-reference is still reported' );
+	}
 }

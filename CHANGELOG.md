@@ -6,6 +6,37 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.7.1 — 2026-08-18
+
+A memory fatal in the 0.7.0 form-counting path, reachable from template text. **Upgrade from 0.7.0.**
+
+### Fixed
+
+- **A 62-character template could kill `validate()` with `Allowed memory size exhausted`.**
+
+  ```
+  #set %a% = %b% %b%
+  #set %b% = %a% %a%
+  {plural 2: one|%a%}
+  ```
+
+  Counting plural forms expands definitions, and the expansion was bounded by 51 *passes* with
+  nothing bounding the *size*. That template doubles the text every pass, so 51 passes is 2^51.
+  Every engine in the family died on it. A non-cyclic doubling chain does the same, so the
+  circular-reference guard never got a chance.
+
+  The expansion now stops at 64 KB and reports the count as unknowable — the same silence this
+  validator already uses for any input it cannot pin down. A form list is a handful of plural
+  forms; nothing legitimate approaches the ceiling.
+
+### Notes
+
+No verdict change for any template that was not crashing. This engine's recursive `#set`-graph
+walk was left as it is: unlike the JS and Python ports it returned an answer rather than
+overflowing, and it served as the reference those two were diffed against when their walks were
+made iterative. Pinned by two corpus fixtures whose real assertion is that the engine answers at
+all — a runner that hangs fails them.
+
 ## 0.7.0 — 2026-08-18
 
 A verdict change, so minor: templates that were reported `plural.arity` are now valid.
