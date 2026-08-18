@@ -13,8 +13,11 @@
  *   diamond never returned and the 2000-definition chain took tens of seconds, so a
  *   complexity regression fails the suite by timeout rather than by numbers.
  *
- * The per-path emission itself (exponential on a diamond that FEEDS a cycle) is the
- * family contract under discussion in spintax-js#59 — these tests pin what ships.
+ * The emission is now ONE diagnostic per name that takes part in, or leads to, a cycle
+ * (spintax-js#59, decided 2026-08-18). It used to be one per PATH, which is exponential on
+ * a diamond that feeds a cycle — 457 bytes produced 524 288 diagnostics here and took the
+ * reference deployment out with HTTP 503. These tests pin what ships, and the two that
+ * pinned the old shape say so in place rather than having quietly disappeared.
  *
  * @package Spintax\Tests
  */
@@ -59,12 +62,26 @@ final class ValidatorCyclesTest extends TestCase {
 		);
 	}
 
-	public function test_a_duplicated_edge_reports_per_occurrence(): void {
-		// References are NOT deduplicated and a report abandons only the frame that made
-		// it — so %b% %b% in a 2-cycle reports three times, twice from a and once from b.
+	// ── The family moved from per-PATH to per-NAME emission on 2026-08-18 (spintax-js#59) ──
+	//
+	// These two pinned the opposite, deliberately: references were NOT deduplicated and a
+	// report abandoned only the frame that made it. They are rewritten rather than deleted
+	// so the reversal stays on the record.
+	//
+	// What forced it: the number of routes through a converging diamond is exponential in
+	// its depth, so in the JS engine a 507-byte template produced 2 097 152 diagnostics in
+	// 5.9 s and 547 bytes took the live /validate-template out with HTTP 503; this engine
+	// measured 524 288 diagnostics from 457 bytes. Per-path cannot be kept and bounded,
+	// because re-walking every route IS the emission. The Python engine already emitted per
+	// name and was immune; the rest followed it.
+	//
+	// Messages are unchanged — the witness edges reproduce the same routes — and verdicts do
+	// not move. The corpus asserts diagnostics as a SUBSET, so no fixture noticed: that is
+	// exactly why these local canaries exist.
+
+	public function test_a_duplicated_edge_reports_once_per_name(): void {
 		$this->assertSame(
 			array(
-				'Circular variable reference detected: a → b → a.',
 				'Circular variable reference detected: a → b → a.',
 				'Circular variable reference detected: b → a → b.',
 			),
@@ -72,24 +89,46 @@ final class ValidatorCyclesTest extends TestCase {
 		);
 	}
 
-	public function test_a_diamond_feeding_a_cycle_reports_per_path(): void {
-		// 2^2 from a0, 2^1 from a1, one each from a2, p and q: nine in all.
+	public function test_a_diamond_feeding_a_cycle_reports_once_per_name(): void {
+		// Was nine — 2^2 from a0, 2^1 from a1, one each from a2, p and q. Now five, one per
+		// name, and each keeps the route it had.
 		$template = "#set %a2% = %p%\n#set %a1% = %a2% %a2%\n#set %a0% = %a1% %a1%\n"
 			. "#set %p% = %q%\n#set %q% = %p%";
 		$this->assertSame(
 			array(
 				'Circular variable reference detected: a2 → p → q → p.',
 				'Circular variable reference detected: a1 → a2 → p → q → p.',
-				'Circular variable reference detected: a1 → a2 → p → q → p.',
-				'Circular variable reference detected: a0 → a1 → a2 → p → q → p.',
-				'Circular variable reference detected: a0 → a1 → a2 → p → q → p.',
-				'Circular variable reference detected: a0 → a1 → a2 → p → q → p.',
 				'Circular variable reference detected: a0 → a1 → a2 → p → q → p.',
 				'Circular variable reference detected: p → q → p.',
 				'Circular variable reference detected: q → p → q.',
 			),
 			$this->circular_messages( $template )
 		);
+	}
+
+	public function test_a_deep_diamond_stays_linear_in_its_depth(): void {
+		// The shape that was a live denial of service: 457 bytes, 524 288 diagnostics.
+		$lines = array( '#set %c1% = %c2%', '#set %c2% = %c1%' );
+		for ( $i = 0; $i < 200; $i++ ) {
+			$src     = 0 === $i ? 'c1' : 'd' . ( $i - 1 );
+			$lines[] = "#set %d{$i}% = %{$src}% %{$src}%";
+		}
+
+		$this->assertCount( 202, $this->circular_messages( implode( "\n", $lines ) ) );
+	}
+
+	public function test_a_giant_cycle_keeps_its_message_text_linear(): void {
+		// Per-name emission alone does not bound the TEXT: N names each printing an N-name
+		// route is still quadratic, and 20 KB of one cycle carried 8.7 MB of it.
+		$lines = array();
+		for ( $i = 0; $i < 1000; $i++ ) {
+			$lines[] = "#set %n{$i}% = %n" . ( ( $i + 1 ) % 1000 ) . '%';
+		}
+		$messages = $this->circular_messages( implode( "\n", $lines ) );
+
+		$this->assertCount( 1000, $messages );
+		$this->assertLessThan( 512 * 1024, strlen( implode( '', $messages ) ) );
+		$this->assertStringContainsString( '(992 more)', $messages[0] );
 	}
 
 	public function test_a_silent_chain_of_2000_definitions_is_clean(): void {

@@ -6,6 +6,32 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.8.0 — 2026-08-18
+
+**Validation now emits one circular-reference error per NAME that takes part in, or leads to, a
+cycle** — it used to emit one per PATH (spintax-js#59). Minor rather than patch: diagnostic output
+visibly changes, though no verdict moves.
+
+### Fixed
+
+The number of routes into a cycle is exponential in the depth of a converging diamond of
+definitions, so 457 bytes produced **524 288 errors in 1.45 s** here; the JS engine measured
+2 097 152 from 507 bytes and its reference deployment answered HTTP 503. Now: 20 errors, immeasurably
+fast, and a diamond of depth 200 stays linear.
+
+The same issue's second half: one cycle of N names printed an N-name route in each of N messages —
+20 KB of one giant cycle carried **8.7 MB of message text**, now 121 KB. The route is capped at
+eight names and becomes a count past that. Real cycles read exactly as they did: the colour walk
+that already existed as a prune now records one witness edge per name, and following those edges
+reproduces the old routes.
+
+### Notes
+
+This reverses a decision `tests/ValidatorCyclesTest.php` pinned on purpose — its header said so —
+so the tests that pinned the old shape were rewritten in place rather than deleted. `spintax-core`
+(Python) already emitted per name and was the one engine immune; its counts are the reference, and
+400 generated definition graphs now agree across all three engines.
+
 ## 0.7.3 — 2026-08-18
 
 The expansion budget added in 0.7.2 was local to `expand_variables()`, and an `#include` is
