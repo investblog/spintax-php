@@ -6,6 +6,35 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.7.2 — 2026-08-18
+
+**Rendering no longer dies on a 62-character template** (spintax-js#69). Not a regression — every
+released version of every engine in the family did this.
+
+### Fixed
+
+```
+#set %a% = %b% %b%
+#set %b% = %a% %a%
+%a%
+```
+
+`Parser::expand_variables` replaces every reference each pass, so the text doubles and 51 passes
+is 2^51: `Allowed memory size exhausted`. Acyclic doubling definitions do it too, so the cycle
+guard never fires. Any reference to such a value reaches it; defining the pair is harmless, and
+so is a conditional testing one, because neither expands the value.
+
+A render may now expand at most 1 MB of `%variable%` text. Past that a reference is left literal
+— exactly what an undefined name already does, so no new output shape appears and rendering
+stays lenient.
+
+### Notes
+
+What a truncated explosion looks like is deliberately not parity-gated: this engine expands by a
+whole-text fixpoint while the JS and Python engines walk per reference, so they stop in different
+places on the same bomb. The contract is that rendering terminates, does not throw, bounds its
+output, and leaves what it could not afford as literal `%name%` — pinned here in `PipelineTest`.
+
 ## 0.7.1 — 2026-08-18
 
 A memory fatal in the 0.7.0 form-counting path, reachable from template text. **Upgrade from 0.7.0.**

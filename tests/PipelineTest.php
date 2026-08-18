@@ -407,4 +407,34 @@ final class PipelineTest extends TestCase {
 		// consumed by stage 8 rather than framing the value.
 		$this->assertSame( 'x=() y=()', trim( $p->render( "#set %x% =\n#def %y% =\nx=(%x%) y=(%y%)", array(), null, '', false ) ) );
 	}
+
+	/**
+	 * An expansion bomb renders instead of ending the process (spintax-js#69).
+	 *
+	 * 62 characters. Each pass replaces one reference with two, so 51 passes is 2^51 —
+	 * this engine died with `Allowed memory size exhausted`, and so did every other engine
+	 * in the family. Acyclic doubling does the same, so the cycle guard never sees it.
+	 *
+	 * What is asserted is the contract: it terminates, it does not throw, the output is
+	 * bounded, and the references it could not afford stay literal. The exact text is
+	 * deliberately NOT pinned — the engines expand by different mechanisms and stop in
+	 * different places, which is why no corpus fixture covers it.
+	 */
+	public function test_an_expansion_bomb_renders_instead_of_ending_the_process(): void {
+		$out = ( new Pipeline() )->render( "#set %a% = %b% %b%\n#set %b% = %a% %a%\n%a%", array(), null, 'en' );
+
+		$this->assertLessThan( 4 * 1024 * 1024, strlen( $out ) );
+		$this->assertStringContainsString( '%b%', $out );
+	}
+
+	/**
+	 * The bound must be invisible to real work: this is the shape a host actually sends.
+	 */
+	public function test_an_ordinary_template_is_nowhere_near_the_expansion_budget(): void {
+		$p = $this->sequenced_pipeline( array( 0 ) );
+
+		$out = $p->render( "#set %greeting% = {Hi|Hello}\n#def %n% = 2\n%greeting%, {plural %n%: guest|guests}!", array(), null, 'en', false );
+
+		$this->assertSame( 'Hi, guests!', trim( $out ) );
+	}
 }
