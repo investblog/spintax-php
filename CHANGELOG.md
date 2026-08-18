@@ -6,6 +6,20 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.7.3 — 2026-08-18
+
+The expansion budget added in 0.7.2 was local to `expand_variables()`, and an `#include` is
+expanded by its own call — so every include had a fresh allowance. Bounded here by
+`MAX_INCLUDES` rather than unbounded as it was in the JS engine, but the shape was the same
+mistake.
+
+### Fixed
+
+`Parser::expand_variables()` takes an optional shared counter by reference, and `Pipeline`
+opens one per render next to the include budget, for the same reason and at the same moment.
+Measured after: 100 includes over one 62-character bomb produce 0.57 MB, flat — the figure one
+include produces. A standalone caller that passes nothing keeps the per-call allowance.
+
 ## 0.7.2 — 2026-08-18
 
 **Rendering no longer dies on a 62-character template** (spintax-js#69). Not a regression — every

@@ -93,6 +93,18 @@ final class Pipeline {
 	private int $budget = self::MAX_INCLUDES;
 
 	/**
+	 * Characters of `%variable%` expansion left for the current render (spintax-js#69).
+	 *
+	 * Per render, includes and all — a child template is expanded by its own call to
+	 * `expand_variables()`, so an allowance local to that method is an allowance per
+	 * subtree and bounds nothing overall. Reset next to the include budget below, for
+	 * the same reason and at the same moment.
+	 *
+	 * @var int|null
+	 */
+	private ?int $expansion_budget = null;
+
+	/**
 	 * @param Parser|null           $parser  Parser instance — inject one with a deterministic RNG to make renders reproducible.
 	 * @param array<string, string> $globals Host-wide variables.
 	 * @param callable|null         $source  fn(string $name): ?string — raw template text for an `#include`, or null when unknown.
@@ -132,7 +144,8 @@ final class Pipeline {
 		string $locale = '',
 		bool $post_process = true
 	): string {
-		$this->budget = self::MAX_INCLUDES;
+		$this->budget           = self::MAX_INCLUDES;
+		$this->expansion_budget = Parser::MAX_EXPANSION_CHARS;
 
 		$text = $this->stages(
 			$raw,
@@ -210,7 +223,7 @@ final class Pipeline {
 		$text = $this->conditionals->apply( $text, $all_vars );
 
 		// Stage 6b: expand %variables%.
-		$text = $this->parser->expand_variables( $text, $all_vars );
+		$text = $this->parser->expand_variables( $text, $all_vars, $this->expansion_budget );
 
 		// Shield again. The pass above is the only place a host construct can enter the document
 		// after the first shield — carried in by a `#set`, a global, a runtime variable or a frozen
@@ -330,7 +343,7 @@ final class Pipeline {
 		$value       = $this->shield_host_constructs( $value, $shielded, $counter );
 
 		$value = $this->conditionals->apply( $value, $vars );
-		$value = $this->parser->expand_variables( $value, $vars );
+		$value = $this->parser->expand_variables( $value, $vars, $this->expansion_budget );
 
 		// Shield again, for the same reason the body does: expansion is the one place a host
 		// construct can enter after the first pass. `#def %frag% = %s%` with
