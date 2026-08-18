@@ -6,6 +6,36 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.7.0 — 2026-08-18
+
+A verdict change, so minor: templates that were reported `plural.arity` are now valid.
+
+### Fixed
+
+- **Plural forms were counted before `%variable%` expansion; the renderer counts them after**
+  (spintax-js#66, found by the Object Pascal port of this engine and confirmed in all five).
+
+  `#def %tail% = few|many` with `{plural 2: one|%tail%}` under `ru` renders correctly as three
+  forms, and the validator reported `plural.arity` for the two it could see in the source. The
+  count now substitutes definition values first — every reference per pass, as the renderer does —
+  and splits the result.
+
+  Only where the count is **provably invariant**: a value carrying any bracket, conditionals
+  included, suppresses the count-based verdicts rather than guessing. `{a|b}` really does always
+  freeze to one form, but `{?flag?a|b|c}` freezes as `a` or as `b|c`, and telling those apart means
+  evaluating the construct. A `#set` named directly in the form slot is the one exception: it is
+  substituted verbatim and still spintax when the plural is decided, so it keeps earning
+  `plural.nested-brackets`.
+
+  This engine's **renderer needed no change** — it has always resolved conditionals before plurals,
+  which is exactly what the TypeScript and Python engines were missing (fixed on their side in
+  `@spintax/core` 0.5.0).
+
+### Notes
+
+`validate()` walks the definition graph once more per call than it strictly needs to; that is
+linear and left alone here rather than folded into a verdict change.
+
 ## 0.6.0 — 2026-08-18
 
 A new diagnostic, so minor rather than patch: validation output changes for a `{plural ...}`
