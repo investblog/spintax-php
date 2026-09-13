@@ -6,6 +6,19 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## Unreleased
+
+### Changed
+
+**A TLD is a label in ONE case (spintax-js#79).** The bare-domain and email shields took any
+`word.Word` for a domain, so a sentence glued to the next one kept its missing space: `kept
+compact.Game categories`, `конец.Начало`. Now the TLD alternative of `$domain_part` is all lower case
+or all upper case — letters without case (`\p{Lo}`, `\p{Lm}`) fit either — written under `(?-i:…)`
+inside the caseless patterns. `example.com`, `ASP.NET`, `info@Example.COM`, `例子.中国` and a punycode
+TLD in any case stay whole; `Yandex.Money` renders `Yandex. Money` and `info@example.Com` is no longer
+an email, the accepted cost. Rendered text changes for these shapes, so this ships as a minor. The
+shared corpus pins it (nine `postprocess/*` cases), and the WordPress plugin carries the same line.
+
 ## 0.8.0 — 2026-08-18
 
 **Validation now emits one circular-reference error per NAME that takes part in, or leads to, a
