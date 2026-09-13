@@ -17,7 +17,22 @@ or all upper case — letters without case (`\p{Lo}`, `\p{Lm}`) fit either — w
 inside the caseless patterns. `example.com`, `ASP.NET`, `info@Example.COM`, `例子.中国` and a punycode
 TLD in any case stay whole; `Yandex.Money` renders `Yandex. Money` and `info@example.Com` is no longer
 an email, the accepted cost. Rendered text changes for these shapes, so this ships as a minor. The
-shared corpus pins it (nine `postprocess/*` cases), and the WordPress plugin carries the same line.
+shared corpus pins it (ten `postprocess/*` cases), and the WordPress plugin carries the same line.
+
+### Fixed
+
+**The email and bare-domain shields no longer retry a run from every start.** Rejecting `Game` made
+`a.a.…a.Game` — one domain from its first start before — a chain PCRE retried from every label:
+4 000 labels took 48 ms where they had taken 0.7 (found by the Codex gate on spintax-js). The email
+pass now takes its local run possessively and the domain pass skips a chain that is no domain, both
+with `(*SKIP)(*FAIL)`: 0.1–0.9 ms at that size, and the older retry on a chain whose last label is
+too short to be a TLD goes with it (39 ms → 0.1). Output is unchanged — every string up to six
+symbols over an alphabet aimed at both shields (3 257 436), 24 000 generated inputs and 18 355
+structured ones where a skip resumes, with two over-skipping control mutations caught. Ordinary text
+costs 2–4 % more.
+
+Not changed, recorded: a dotted chain past about 16 KB still exhausts PCRE's JIT stack in the domain
+pattern itself, and `preg_replace_callback` then returns null. So it did before.
 
 ## 0.8.0 — 2026-08-18
 
