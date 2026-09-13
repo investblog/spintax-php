@@ -23,7 +23,7 @@ shared corpus pins it (ten `postprocess/*` cases), and the WordPress plugin carr
 
 **The email and bare-domain shields no longer retry a run from every start.** Rejecting `Game` made
 `a.a.…a.Game` — one domain from its first start before — a chain PCRE retried from every label:
-4 000 labels took 48 ms where they had taken 0.7 (found by the Codex gate on spintax-js). The email
+2 000 one-character labels (about 4 KB) took 48 ms where they had taken 0.7 (found by the Codex gate on spintax-js). The email
 pass now takes its local run possessively and the domain pass skips a chain that is no domain, both
 with `(*SKIP)(*FAIL)`: 0.1–0.9 ms at that size, and the older retry on a chain whose last label is
 too short to be a TLD goes with it (39 ms → 0.1). Output is unchanged — every string up to six
