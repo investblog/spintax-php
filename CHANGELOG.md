@@ -31,8 +31,11 @@ symbols over an alphabet aimed at both shields (3 257 436), 24 000 generated inp
 structured ones where a skip resumes, with two over-skipping control mutations caught. Ordinary text
 costs 2–4 % more.
 
-Not changed, recorded: a dotted chain past about 16 KB still exhausts PCRE's JIT stack in the domain
-pattern itself, and `preg_replace_callback` then returns null. So it did before.
+Not changed, recorded: one dotted chain of about 6 100 labels exhausts PCRE's JIT stack in the email
+and domain patterns — the limit counts labels, not bytes: 12 KB of one-letter labels, 18 KB of two-letter
+ones. `preg_replace_callback` returns null there and `post_process()` then returns an empty string, so
+the whole text is lost, not only the chain. Measured 2026-09-14: 6 144 labels before this change, 6 143
+after. (This note said "about 16 KB" and "returns null" until then.)
 
 ## 0.8.0 — 2026-08-18
 
