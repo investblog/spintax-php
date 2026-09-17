@@ -318,7 +318,8 @@ class Parser {
 		// Pass numbers, worked out in dependency order so a dependency's is always known first.
 		$pass = array();
 
-		for ( $i = 0; $i < count( $ready ); $i++ ) {
+		// Same reason as the queue above: this list grows as names are unblocked.
+		for ( $i = 0; isset( $ready[ $i ] ); $i++ ) {
 			$name  = $ready[ $i ];
 			$level = 1;
 
@@ -386,7 +387,9 @@ class Parser {
 		$seen  = array();
 
 		// An index, not `array_shift()`: shifting reindexes the whole queue on every pop.
-		for ( $i = 0; $i < count( $queue ); $i++ ) {
+		// `isset()` rather than a counted bound, because the queue GROWS as aliases are hopped
+		// and a length read once would stop short.
+		for ( $i = 0; isset( $queue[ $i ] ); $i++ ) {
 			$name = $queue[ $i ];
 
 			if ( isset( $seen[ $name ] ) ) {
