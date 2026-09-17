@@ -67,6 +67,54 @@ final class RestoreParityTest extends TestCase {
 	}
 
 	/**
+	 * A NUL that a ROLLED DEFINITION carries keeps the next definition on the sequential restore.
+	 *
+	 * The map a roll reads is built once and grown by each frozen value, so what a definition adds
+	 * to it has to be watched as closely as what the caller put there. `%a%` freezes an unpaired
+	 * NUL followed by the NAME of a key `%b%` goes on to mint, and in `%b%`'s working text the two
+	 * spell `\x00HOST_1\x00` — a key the shield never minted for it. The sequential restore is the
+	 * answer here, as it is for a caller-supplied NUL; the single pass tokenises the forgery first
+	 * and returns `[host id="B"]HOST_0\x00[host id="B"]`.
+	 *
+	 * Nothing else in the suite covers it: every other NUL here arrives with the caller, which the
+	 * one scan before the loop already sees.
+	 */
+	public function test_a_nul_frozen_into_a_definition_keeps_the_sequential_restore(): void {
+		$template = "#def %a% = \x00HOST_1\n#def %b% = %a%[host id=\"A\"][host id=\"B\"]\n%b%";
+
+		$this->assertSame(
+			"\x00HOST_1[host id=\"A\"][host id=\"B\"]",
+			ltrim( $this->pipeline()->render( $template, array(), null, '', false ), "\n" )
+		);
+	}
+
+	/**
+	 * A definition that SHADOWS the last NUL-bearing value puts the single pass back.
+	 *
+	 * The mirror of the test above, and the direction a plain flag gets wrong. The global `%a%`
+	 * carries a NUL, `#def %a%` replaces it with clean text, and by the time `%b%` rolls the map
+	 * holds no NUL at all — so `%b%` is restored in one pass and its forged key survives, exactly
+	 * as `test_a_forged_host_key_restores_as_the_single_pass_does` has it. A roll can take the
+	 * last NUL out of the map as easily as it can add one.
+	 */
+	public function test_a_definition_that_shadows_the_last_nul_restores_in_one_pass(): void {
+		$p = new Pipeline(
+			new Parser( static fn( int $min, int $max ): int => $min ),
+			array( 'a' => "dirty\x00value" ),
+			null,
+			array( '/\[host[^\]]*\]/' ),
+			null
+		);
+
+		$template = "#def %a% = clean\n#def %b% = [host id=\"0\"] [host id=\"1\"]HOST_0[host id=\"2\"]\n%b%";
+
+		$this->assertSame(
+			'[host id="0"] [host id="1"]HOST_0[host id="2"]',
+			ltrim( $p->render( $template, array(), null, '', false ), "\n" )
+		);
+	}
+
+	/**
 	 * A key forged across two real tokens — with no NUL in the input at all.
 	 *
 	 * Placeholder delimiters are not owned by the token that placed them. Here the shield leaves

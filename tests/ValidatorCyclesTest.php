@@ -2,7 +2,7 @@
 /**
  * Validator — the circular-reference walk: emission shape and the non-hang canaries.
  *
- * The 0.5.1 rewrite (references_of / names_that_reach_a_cycle / walk_cycles_from) was
+ * The 0.5.1 rewrite (references_of / names_that_reach_a_cycle / cycle_path) was
  * gated by a 464-document differential that lives outside this repository, so CI could
  * not re-prove it. These tests are the runnable half of that proof:
  *
@@ -168,5 +168,57 @@ final class ValidatorCyclesTest extends TestCase {
 		$lines[0] = '#set %t0% = plain';
 		$control  = implode( "\n", $lines ) . "\n{plural %t299%: one|many}";
 		$this->assertSame( array(), $this->validate( $control, 'en' )['errors'] );
+	}
+
+	/**
+	 * A capped message counts what it leaves out from one measurement, and this is the tripwire.
+	 *
+	 * Counting it per message walked the rest of the cycle again for each of its names, so N
+	 * names cost N routes of N. The bound is deliberately far above the measured cost — 0.18 s
+	 * here, against 7.5 s for the same template before the fix — so it says nothing about how
+	 * fast the machine is and everything about which count ran.
+	 */
+	public function test_a_capped_route_counts_what_it_leaves_out_without_a_walk_per_name(): void {
+		$lines = array();
+		for ( $i = 0; $i < 16000; $i++ ) {
+			$lines[] = "#set %n{$i}% = %n" . ( ( $i + 1 ) % 16000 ) . '%';
+		}
+
+		$started  = hrtime( true );
+		$messages = $this->circular_messages( implode( "\n", $lines ) );
+		$elapsed  = ( hrtime( true ) - $started ) / 1e9;
+
+		$this->assertCount( 16000, $messages );
+		$this->assertStringContainsString( '(15992 more)', $messages[0] );
+		$this->assertLessThan( 3.0, $elapsed, sprintf( 'a cycle of 16 000 names took %.3f s', $elapsed ) );
+	}
+
+	/**
+	 * A route that runs down a tail into its cycle counts the tail as well.
+	 *
+	 * The two numbers are what tell a measured-once count from a walked-per-name one: `t0` is
+	 * five tail names plus a ten-name cycle, so eight shown leaves seven; `c0` lies ON the cycle,
+	 * so ten leaves two. Byte-identical to `@spintax/core`'s own canary for this shape.
+	 */
+	public function test_a_route_down_a_tail_counts_the_tail_and_the_cycle(): void {
+		$lines = array();
+		for ( $k = 0; $k < 5; $k++ ) {
+			$lines[] = "#set %t{$k}% = %" . ( $k < 4 ? 't' . ( $k + 1 ) : 'c0' ) . '%';
+		}
+		for ( $k = 0; $k < 10; $k++ ) {
+			$lines[] = "#set %c{$k}% = %c" . ( ( $k + 1 ) % 10 ) . '%';
+		}
+
+		$messages = $this->circular_messages( implode( "\n", $lines ) );
+
+		$this->assertCount( 15, $messages );
+		$this->assertSame(
+			'Circular variable reference detected: t0 → t1 → t2 → t3 → t4 → c0 → c1 → c2 → … (7 more).',
+			$messages[0]
+		);
+		$this->assertSame(
+			'Circular variable reference detected: c0 → c1 → c2 → c3 → c4 → c5 → c6 → c7 → … (2 more).',
+			$messages[5]
+		);
 	}
 }

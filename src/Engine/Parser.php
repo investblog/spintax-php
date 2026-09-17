@@ -28,6 +28,14 @@ class Parser {
 	private $random_fn;
 
 	/**
+	 * Whether `expand_variables()` is a subclass's rather than this class's — see
+	 * `expansion_is_overridden()`. Null until first asked.
+	 *
+	 * @var bool|null
+	 */
+	private ?bool $expansion_overridden = null;
+
+	/**
 	 * The one grammar for `#set` and `#def`, shared by the parser and the validator.
 	 *
 	 * Whitespace classes are restricted to spaces and tabs on purpose. `\s` would
@@ -170,6 +178,12 @@ class Parser {
 			array_diff_key( $extracted['def'], $caller )
 		);
 
+		// Deliberately NOT on the normalised fast path the `Pipeline` roll takes. This map is the
+		// caller's, raw, and `expand_variables()` is what a subclass overrides — handing it a
+		// collapsed map, or an argument it did not get before, would change what such an override
+		// sees. `Pipeline` has neither problem: `RenderContext` normalises on the way in, so the
+		// map there is already lowercase. The convenience path keeps the per-call key pass; it was
+		// never the one measured (found by the Codex gate).
 		foreach ( $this->order_definitions( $extracted['def'], $aliases ) as $name ) {
 			if ( array_key_exists( $name, $caller ) ) {
 				continue;
@@ -240,43 +254,113 @@ class Parser {
 	 * A cycle cannot be ordered, so its members are emitted last in declaration order; rendering
 	 * them then relies on `expand_variables()`'s own depth guard rather than looping here.
 	 *
+	 * The sequence is the one a left-to-right sweep produces — walk the names still unplaced, in
+	 * source order, taking each whose dependencies are all placed, and repeat — but it is COUNTED
+	 * rather than swept. A name's pass is one past every dependency's, and one past that again for
+	 * a dependency written BELOW it, which the sweep only saw on its next walk of the list.
+	 * Bucketing by pass, source order within a bucket, reproduces the sweep in
+	 * O(names + references): the sweep re-tested every pending name against a live `in_array()`
+	 * list, and a 1 600-definition chain took 1.2 s.
+	 *
+	 * Deliberately NOT the reference engine's order. `@spintax/core` places whole rounds at a
+	 * time, so it rolls `a, c, b` where this rolls `a, b, c` for `#def %a%` / `#def %b% = %a%` /
+	 * `#def %c%`. Every roll draws from the RNG, so the difference is visible in rendered text;
+	 * which order is contract is investblog/spintax-js#82, and until that is decided this engine
+	 * keeps the one it has always had.
+	 *
 	 * @param array<string, string> $definitions `#def` values, name => raw value.
 	 * @param array<string, string> $set_values  `#set` values, name => raw value, for alias hops.
 	 * @return list<string> Definition names, dependencies first.
 	 */
 	public function order_definitions( array $definitions, array $set_values = array() ): array {
-		$names   = array_keys( $definitions );
-		$blocked = array();
+		$names    = array_keys( $definitions );
+		$position = array();
+		$index    = 0;
 
-		foreach ( $definitions as $name => $value ) {
-			$blocked[ $name ] = array_intersect(
-				$this->referenced_names( $value, $set_values ),
-				$names
-			);
+		foreach ( $names as $name ) {
+			$position[ $name ] = $index;
+			++$index;
 		}
 
-		$ordered = array();
-		$pending = $names;
+		// `referenced_names()` and `array_keys()` coerce an integer-like name identically, so a
+		// reference is a dependency exactly when it is a key here — which is what the sweep's
+		// strict `in_array( $dependency, $pending, true )` was asking.
+		$dependencies = array();
+		$dependents   = array();
+		$outstanding  = array();
+		$ready        = array();
+		$alias_cache  = array();
 
-		while ( ! empty( $pending ) ) {
-			$progressed = false;
+		foreach ( $definitions as $name => $value ) {
+			$deps = array();
 
-			foreach ( $pending as $index => $name ) {
-				foreach ( $blocked[ $name ] as $dependency ) {
-					if ( $dependency !== $name && in_array( $dependency, $pending, true ) ) {
-						continue 2;
-					}
+			foreach ( $this->referenced_names( $value, $set_values, $alias_cache ) as $reference ) {
+				if ( $reference === $name || ! isset( $position[ $reference ] ) ) {
+					continue;
 				}
-
-				$ordered[] = $name;
-				unset( $pending[ $index ] );
-				$progressed = true;
+				$deps[ $reference ] = true;
 			}
 
-			$pending = array_values( $pending );
+			$dependencies[ $name ] = $deps;
+			$outstanding[ $name ]  = count( $deps );
 
-			if ( ! $progressed ) {
-				return array_merge( $ordered, $pending );
+			foreach ( $deps as $dependency => $unused ) {
+				$dependents[ $dependency ][] = $name;
+			}
+		}
+
+		foreach ( $names as $name ) {
+			if ( 0 === $outstanding[ $name ] ) {
+				$ready[] = $name;
+			}
+		}
+
+		// Pass numbers, worked out in dependency order so a dependency's is always known first.
+		$pass = array();
+
+		for ( $i = 0; $i < count( $ready ); $i++ ) {
+			$name  = $ready[ $i ];
+			$level = 1;
+
+			foreach ( $dependencies[ $name ] as $dependency => $unused ) {
+				$after = $pass[ $dependency ] + ( $position[ $dependency ] > $position[ $name ] ? 1 : 0 );
+				if ( $after > $level ) {
+					$level = $after;
+				}
+			}
+
+			$pass[ $name ] = $level;
+
+			foreach ( $dependents[ $name ] ?? array() as $dependent ) {
+				if ( 0 === --$outstanding[ $dependent ] ) {
+					$ready[] = $dependent;
+				}
+			}
+		}
+
+		// Walking the names in source order is what puts a bucket in source order — no sort.
+		$buckets = array();
+
+		foreach ( $names as $name ) {
+			if ( isset( $pass[ $name ] ) ) {
+				$buckets[ $pass[ $name ] ][] = $name;
+			}
+		}
+
+		ksort( $buckets );
+		$ordered = array();
+
+		foreach ( $buckets as $bucket ) {
+			foreach ( $bucket as $name ) {
+				$ordered[] = $name;
+			}
+		}
+
+		// Whatever a cycle holds back comes last in declaration order — the sweep's no-progress
+		// exit, which appended the pending remainder exactly as it stood.
+		foreach ( $names as $name ) {
+			if ( ! isset( $pass[ $name ] ) ) {
+				$ordered[] = $name;
 			}
 		}
 
@@ -286,16 +370,24 @@ class Parser {
 	/**
 	 * Every variable name a value reaches, hopping through `#set` aliases.
 	 *
-	 * @param string                $value      Raw value.
-	 * @param array<string, string> $set_values `#set` values to follow through.
+	 * `$alias_cache` holds each alias value's direct references for the length of ONE ordering
+	 * call. Every definition that reaches the same alias used to re-run `preg_match_all` over it,
+	 * which is the quadratic half of a graph that leans on aliases. It is a parameter rather than
+	 * a field because the caller's `#set` map differs from call to call, and a cache that outlived
+	 * the map would answer for the wrong one.
+	 *
+	 * @param string                $value       Raw value.
+	 * @param array<string, string> $set_values  `#set` values to follow through.
+	 * @param array<string, list<string>> $alias_cache Per-call memo, name => direct references.
 	 * @return list<string> Referenced names, lowercased.
 	 */
-	private function referenced_names( string $value, array $set_values ): array {
+	private function referenced_names( string $value, array $set_values, array &$alias_cache = array() ): array {
 		$queue = $this->direct_references( $value );
 		$seen  = array();
 
-		while ( ! empty( $queue ) ) {
-			$name = array_shift( $queue );
+		// An index, not `array_shift()`: shifting reindexes the whole queue on every pop.
+		for ( $i = 0; $i < count( $queue ); $i++ ) {
+			$name = $queue[ $i ];
 
 			if ( isset( $seen[ $name ] ) ) {
 				continue;
@@ -303,7 +395,13 @@ class Parser {
 			$seen[ $name ] = true;
 
 			if ( array_key_exists( $name, $set_values ) ) {
-				foreach ( $this->direct_references( $set_values[ $name ] ) as $next ) {
+				$key = (string) $name;
+
+				if ( ! isset( $alias_cache[ $key ] ) ) {
+					$alias_cache[ $key ] = $this->direct_references( $set_values[ $name ] );
+				}
+
+				foreach ( $alias_cache[ $key ] as $next ) {
 					$queue[] = $next;
 				}
 			}
@@ -422,6 +520,70 @@ class Parser {
 			$normalised[ strtolower( $k ) ] = $v;
 		}
 
+		// Straight to the loop, not through `expand_normalised_variables()`: that one hands work
+		// BACK to this method when a subclass has overridden it, and going the other way round
+		// would be a cycle.
+		return $this->expand_prepared( $text, $normalised, $shared_budget );
+	}
+
+	/**
+	 * `expand_variables()` for a caller that has already lowercased its keys.
+	 *
+	 * Rebuilding that map costs O(names) on EVERY call, and rolling `#def` values calls this once
+	 * per definition against a map that grows by one name per definition — 6 400 independent
+	 * definitions spent 527 ms of their 577 on the rebuild alone. The two roll loops in this
+	 * package build their map themselves, out of directive names that `extract_directives()` has
+	 * already lowercased, over a base run through `array_change_key_case()` once, so they can say
+	 * so and skip it.
+	 *
+	 * A separate method rather than a fourth parameter on `expand_variables()`: that one is public
+	 * on a non-final class, and adding a parameter to it makes every existing override
+	 * signature-incompatible — a fatal error, not a deprecation (found by the Codex gate).
+	 *
+	 * The promise is not checked. Passing `Foo` here silently loses `%foo%`, so a caller that is
+	 * not certain wants `expand_variables()`.
+	 *
+	 * @param string $text      Text with %var% references.
+	 * @param array  $variables name => raw value, keys ALREADY lowercased.
+	 * @param int|null $shared_budget Expansion allowance shared across one render; null ⇒ a per-call one.
+	 * @return string Text with variables expanded.
+	 */
+	public function expand_normalised_variables( string $text, array $variables, ?int &$shared_budget = null ): string {
+		// A subclass that overrides `expand_variables()` used to intercept definition rolls too,
+		// because that is the method the rolls called. This one is a shortcut past the key pass,
+		// not a new seam past the subclass, so where there is an override it hands the work back
+		// and pays the normalisation it always paid (found by the Codex gate).
+		if ( $this->expansion_is_overridden() ) {
+			return $this->expand_variables( $text, $variables, $shared_budget );
+		}
+
+		return $this->expand_prepared( $text, $variables, $shared_budget );
+	}
+
+	/**
+	 * Does `expand_variables()` belong to a subclass?
+	 *
+	 * Asked once per parser and remembered — a render rolls definitions in a loop, and the answer
+	 * cannot change for the life of the object.
+	 */
+	private function expansion_is_overridden(): bool {
+		if ( null === $this->expansion_overridden ) {
+			$declared                   = new \ReflectionMethod( $this, 'expand_variables' );
+			$this->expansion_overridden = self::class !== $declared->getDeclaringClass()->getName();
+		}
+
+		return $this->expansion_overridden;
+	}
+
+	/**
+	 * The expansion loop itself, over a map whose keys are already lowercase.
+	 *
+	 * @param string $text          Text with %var% references.
+	 * @param array  $normalised    name => raw value, keys lowercased.
+	 * @param int|null $shared_budget Expansion allowance; null ⇒ a per-call one.
+	 * @return string
+	 */
+	private function expand_prepared( string $text, array $normalised, ?int &$shared_budget ): string {
 		// A caller that threads its own counter gets ONE allowance for the whole render,
 		// includes and all: each included body is expanded by its own call, so a budget
 		// local to this method is a budget per subtree. Fifty `#include` lines over one

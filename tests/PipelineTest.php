@@ -437,4 +437,94 @@ final class PipelineTest extends TestCase {
 
 		$this->assertSame( 'Hi, guests!', trim( $out ) );
 	}
+
+	// ── rolling definitions does not pay for every definition again ──────────────
+
+	/**
+	 * Ordering a chain is linear, and this is the tripwire.
+	 *
+	 * Ordering used to re-test every pending name against a live `in_array()` list, so a chain
+	 * whose every definition depends on the one declared AFTER it advanced by one name per sweep
+	 * and re-walked the rest each time. The bound is deliberately far above the measured cost —
+	 * 0.03 s here, against 10.8 s for the same template before the fix — so it says nothing about
+	 * how fast the machine is and everything about which ordering ran.
+	 */
+	public function test_ordering_a_reverse_chain_of_definitions_does_not_go_quadratic_again(): void {
+		$lines = array();
+		for ( $i = 0; $i < 3199; $i++ ) {
+			$lines[] = "#def %d{$i}% = %d" . ( $i + 1 ) . '%';
+		}
+		$lines[] = '#def %d3199% = x';
+		$lines[] = '%d0%';
+
+		$p        = $this->sequenced_pipeline( array( 0 ) );
+		$template = implode( "\n", $lines );
+
+		$started = hrtime( true );
+		$out     = $p->render( $template, array(), null, '', false );
+		$elapsed = ( hrtime( true ) - $started ) / 1e9;
+
+		$this->assertSame( 'x', trim( $out ) );
+		$this->assertLessThan( 3.0, $elapsed, sprintf( 'rolling a 3 200-definition chain took %.3f s', $elapsed ) );
+	}
+
+	/**
+	 * Rolling independent definitions is linear, and this is the tripwire.
+	 *
+	 * Each roll used to be handed a freshly merged copy of the map of rolled values, re-derive
+	 * whether any of them carried a NUL, and re-lowercase every key — three passes over a map
+	 * that grows by one name per definition. 0.05 s here, against 18.2 s before the fix.
+	 */
+	public function test_rolling_independent_definitions_does_not_go_quadratic_again(): void {
+		$lines = array();
+		for ( $i = 0; $i < 12800; $i++ ) {
+			$lines[] = "#def %d{$i}% = {a|b}";
+		}
+		$lines[] = '%d0%';
+
+		$p        = $this->sequenced_pipeline( array( 0 ) );
+		$template = implode( "\n", $lines );
+
+		$started = hrtime( true );
+		$out     = $p->render( $template, array(), null, '', false );
+		$elapsed = ( hrtime( true ) - $started ) / 1e9;
+
+		$this->assertSame( 'a', trim( $out ) );
+		$this->assertLessThan( 3.0, $elapsed, sprintf( 'rolling 12 800 independent definitions took %.3f s', $elapsed ) );
+	}
+
+	/**
+	 * A parser subclass keeps intercepting definition rolls, not just the body.
+	 *
+	 * `Pipeline` takes an injected parser, so overriding `expand_variables()` is a real extension
+	 * path — and before `expand_normalised_variables()` existed, the rolls went through the same
+	 * public method the body does. The shortcut past the key pass must not become a shortcut past
+	 * the subclass: where there is an override, the roll hands the work back to it.
+	 */
+	public function test_a_parser_subclass_still_intercepts_a_definition_roll(): void {
+		$parser = new class( static fn( int $min, int $max ): int => $min ) extends Parser {
+			public function expand_variables( string $text, array $variables, ?int &$shared_budget = null ): string {
+				return '<>' . parent::expand_variables( $text, $variables, $shared_budget );
+			}
+		};
+
+		$out = ( new Pipeline( $parser ) )->render( "#def %a% = x\n%a%", array(), null, '', false );
+
+		// Twice: once rolling `%a%`, once expanding the body — one would mean the roll went round.
+		$this->assertSame( 2, substr_count( $out, '<>' ) );
+	}
+
+	/**
+	 * The bound must be invisible to real work, here too.
+	 */
+	public function test_an_ordinary_template_is_nowhere_near_the_rolling_bound(): void {
+		$p = $this->sequenced_pipeline( array( 0 ) );
+
+		$started = hrtime( true );
+		$out     = $p->render( "#set %city% = {Rome|Oslo}\n#def %greet% = {Hi|Hello}\n%greet%, %city%!", array(), null, 'en', false );
+		$elapsed = ( hrtime( true ) - $started ) / 1e9;
+
+		$this->assertSame( 'Hi, Rome!', trim( $out ) );
+		$this->assertLessThan( 0.1, $elapsed, sprintf( 'an ordinary template took %.4f s', $elapsed ) );
+	}
 }

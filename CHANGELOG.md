@@ -37,6 +37,59 @@ ones. `preg_replace_callback` returns null there and `post_process()` then retur
 the whole text is lost, not only the chain. Measured 2026-09-14: 6 144 labels before this change, 6 143
 after. (This note said "about 16 KB" and "returns null" until then.)
 
+**Rolling definitions and capped cycle messages no longer pay per name.** Three loops charged
+the whole map for every name in it. `Parser::order_definitions()` re-tested every pending name
+against a live `in_array( $dependency, $pending, true )` list, so a chain whose every definition
+depends on the one declared *after* it advanced one name per sweep and re-walked the rest each
+time. `Pipeline::roll_definitions()` handed each roll a fresh `array_merge( $vars, $resolved )`,
+re-derived from it whether any value carried a NUL, and — through `expand_variables()` — rebuilt
+the lowercased key map, three passes over a map that grows by one name per definition.
+`Validator::cycle_path()` counted what a capped route leaves out by walking the rest of the cycle
+again for each of its names. Measured on PHP 8.4.25, same machine: a 3 200-definition reverse
+chain 10.8 s → 0.033 s; 12 800 independent definitions 18.2 s → 0.046 s; one cycle of 16 000
+names 7.5 s → 0.18 s. The order a sweep produced is preserved exactly — it is counted now rather
+than swept, one pass past every dependency and one past that again for a dependency written below
+— because which order is contract is still open (spintax-js#82), and `ParserProcessDefTest` now
+pins the six shapes that tell the two apart. Route lengths are measured once for all names; `#set`
+alias values are parsed once per ordering call; the roll reads one map that grows by each frozen
+value and tracks WHICH names carry a NUL beside it — a `#def` shadows a global of the same name,
+so a roll can take the last NUL out of the map as easily as put one in, and a flag that only ever
+turned on answered differently for the rest of the render. Same fix as `@spintax/core` 0.9.0,
+which took the reference's own ordering instead.
+
+Output is byte-identical over 3 000 generated definition-graph documents — chains forward and
+back, cycles with tails long enough to cap a message, shadowed globals, definitions a runtime
+variable outranks, conditionals on definition names, aliases through `#set`, globals and runtime,
+and names written in mixed case — through `validate()` and six renders each, diagnostic text
+included, against a render that shields host constructs so the restore choice is exercised. Seven
+control mutations were written first and every one goes red: the pass formula blind to a
+dependency's position, a bucket emitted in discovery order, a route measured one name long, the
+frozen value joining the map before its render rather than after, and the NUL answer failing to
+turn on, are caught by the differential; the NUL answer failing to turn OFF, and the roll skipping
+a subclass's `expand_variables()`, are caught by the tests written for them — seeing the first in
+a generated document needs a shadowed NUL and a forged key at once, and the second needs a
+subclass. The suite also gained the three time tripwires, which fail on the old code at 11.2 s,
+18.4 s and 7.2 s against a 3 s bound, the two `(N more)` counts, and the six ordering shapes.
+
+One shape does move, and it was already broken: a definition whose name is only digits.
+`array_merge()` renumbers an integer-like array key instead of overwriting it, so `#def %7% = A`
+with `#def %b% = %7%B` rendered `%7%B`, and `#def %1% = one` over `#def %2% = %1%two` printed
+`%1%two` followed by fifty repetitions of `two`. Those now render `AB` and `onetwo %2%`. Still
+not right — `@spintax/core` and `spintax-core` both render `AB` and `one onetwo`, and
+`#def %7% = rolled` on its own still comes back literal here. PHP is the only engine in the
+family that breaks on these names; the rest of the fix is spintax-js#84.
+
+### Added
+
+**`Parser::expand_normalised_variables()`** — `expand_variables()` for a caller whose keys are
+already lowercase, which is what lets the roll skip a per-call rebuild of that map. A new method
+rather than a fourth parameter on `expand_variables()`: that one is public on a non-final class,
+and adding a parameter to it makes every existing override signature-incompatible — a fatal error,
+not a deprecation. `expand_variables()` keeps its signature, and a subclass that overrides it goes
+on intercepting definition rolls as well as the body: the new method asks once per parser whether
+it is looking at an override and hands the work back where it is, paying the normalisation it
+always paid. A shortcut past the key pass is not meant to be a shortcut past the subclass.
+
 ## 0.8.0 — 2026-08-18
 
 **Validation now emits one circular-reference error per NAME that takes part in, or leads to, a
