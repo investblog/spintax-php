@@ -89,7 +89,9 @@ final class GoldenCorpusTest extends TestCase {
 				break;
 			case 'neutralize':
 				// TS-only divergence: `@spintax/core` restores literal glyphs, the PHP engine
-				// entity-encodes and never decodes. Such fixtures carry engines:["ts"].
+				// entity-encodes and never decodes. Such fixtures carry engines:["ts","py"] — all
+				// but `neutralize/identity-plain`, which the provider therefore admits and this
+				// arm skips.
 				$this->markTestSkipped( 'neutralize is a TS-only surface' );
 				break;
 			default:
@@ -134,6 +136,13 @@ final class GoldenCorpusTest extends TestCase {
 			$this->assertSameSet( $expect['sets'], $sets, "sets for {$c['id']}" );
 			$asserted = true;
 		}
+		// `#def` names are their own bucket, never folded into `sets`: the two directives differ in
+		// semantics, so a consumer that lints one has to be able to tell them apart.
+		if ( array_key_exists( 'defs', $expect ) ) {
+			$defs = array_keys( $parser->extract_directives( $text )['def'] );
+			$this->assertSameSet( $expect['defs'], $defs, "defs for {$c['id']}" );
+			$asserted = true;
+		}
 		if ( array_key_exists( 'includes', $expect ) ) {
 			$includes = array_map(
 				static fn( array $d ): string => $d['slug'],
@@ -142,6 +151,11 @@ final class GoldenCorpusTest extends TestCase {
 			$this->assertSameSet( $expect['includes'], $includes, "includes for {$c['id']}" );
 			$asserted = true;
 		}
+		// Left alone deliberately, and it is NOT what the other engines scan: they strip the
+		// `#set`/`#def` left-hand side only and keep the value, while this drops the whole `#set`
+		// line and keeps the whole `#def` one. No fixture separates the two rules yet; which one
+		// is contract is investblog/spintax-js#83, and moving it here alone would trade one
+		// divergence for its mirror image.
 		if ( array_key_exists( 'refs', $expect ) ) {
 			$body = $parser->extract_set_directives( $text )['body'];
 			$this->assertSameSet( $expect['refs'], $this->extractRefs( $body ), "refs for {$c['id']}" );
