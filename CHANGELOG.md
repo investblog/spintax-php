@@ -6,7 +6,14 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
-## Unreleased
+## 0.9.0 — 2026-09-17
+
+**A TLD is a label in one case, and the loops that paid per name are gone.** Matches
+`@spintax/core` 0.9.0 change for change. Minor rather than patch because of the first half only:
+a bare domain or email whose last label is mixed case renders differently now. The rest is
+output-neutral, and says so with numbers — a 3 257 436-string exhaustive sweep for the shields,
+a 3 000-document differential for the definition rolls, control mutations red before either was
+believed.
 
 ### Changed
 
