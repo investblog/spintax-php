@@ -6,7 +6,10 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
-## Unreleased
+## 0.10.0 — 2026-09-19
+
+**No stray space before a closing quote or bracket.** Matches `@spintax/core` 0.10.0 change for change.
+Minor, because rendered text moves for the shapes below.
 
 ### Fixed
 
