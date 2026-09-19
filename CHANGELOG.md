@@ -6,6 +6,22 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## Unreleased
+
+### Fixed
+
+**No space between a punctuation mark and the quote or bracket that closes it.** The two spacing
+passes after `,;:` and after a run of `.!?` put their space in front of whatever came next unless it
+was a space, a digit, a tag or the end — so a closing quote or bracket got one: `"Is it audited? ",
+the figure`, `He called it "the best. "`, `«Как дела? », и ушёл`, `(really? )`. Both passes now also
+stop at a CLOSER: `)` or `]` always, and a run of quotes (`"'«»‹›“”‘’`) when whitespace, the end, a
+tag, the end of a tag, `.,;:!?…`, `)`, `]` or a dash follows it. A quote before anything else — a word,
+a number, `(`, `$`, a placeholder — keeps the space it always got; the accepted cost is an opening quote
+glued to the mark whose text starts with a follower (`is it?"—no"`). Rendered text changes for these
+shapes, so this ships as a minor. Same rule as `@spintax/core`; the shared corpus pins it (nineteen
+`postprocess/*` cases, identical output on 143 968 generated inputs across the three engines), and the
+WordPress plugin carries the same line.
+
 ## 0.9.0 — 2026-09-17
 
 **A TLD is a label in one case, and the loops that paid per name are gone.** Matches
