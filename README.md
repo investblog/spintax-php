@@ -39,8 +39,8 @@ Plural agreement is the one people discover late. `%n% {товар|товара|
 random — which is wrong for 1, wrong for 3, and wrong for 5. Russian, Ukrainian and Serbian content
 cannot be generated correctly without a number-gated form; this engine has one.
 
-Three-form locales are `ru`, `uk`, `be`, `sr`, `hr`, `bs`. Everything else takes the EN-style
-2-form rule — including `pl`, `cs`, `sk`, `sl` and `bg`, whose real rules differ and which are
+Three-form locales are `ru`, `uk`, `be`, `sr`, `hr`, `bs`; `ar` takes six forms
+(zero|one|two|few|many|other). Everything else takes the EN-style 2-form rule — including `pl`, `cs`, `sk`, `sl` and `bg`, whose real rules differ and which are
 therefore **not** yet supported: they are accepted silently and bucketed wrongly, not rejected.
 
 ## Install
@@ -60,7 +60,7 @@ composer require spintax/core
 | `#set %var% = value` | local variable, **macro**: the value is substituted at every reference and its brackets re-roll each time |
 | `#def %var% = value` | local variable, **roll-once**: the value is rendered a single time and every reference sees that same text |
 | `{?VAR?then\|else}` | conditional — `{?!VAR?…}` inverts it |
-| `{plural <count>: one\|few\|many}` | plural agreement by grammatical bucket (RU/UK/BE + SR/HR/BS 3-form, EN-style 2-form) |
+| `{plural <count>: one\|few\|many}` | plural agreement by grammatical bucket (RU/UK/BE + SR/HR/BS 3-form, AR 6-form zero\|one\|two\|few\|many\|other, EN-style 2-form) |
 | `#include "name"` | embed another template |
 | `/# … #/` | comment, stripped from the output |
 

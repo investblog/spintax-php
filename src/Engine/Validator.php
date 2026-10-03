@@ -424,7 +424,7 @@ class Validator {
 	 * spintax brackets `{` `}` `[` `]`.
 	 *
 	 * Arity check (only when locale provided): form count must match the
-	 * locale family (3 for ru/uk/be + sr/hr/bs, 2 for en/es/pt/de/...). Empty locale
+	 * locale family (6 for ar, 3 for ru/uk/be + sr/hr/bs, 2 for en/es/pt/de/...). Empty locale
 	 * skips arity — useful when the validator runs without locale context
 	 * and wants to surface only structural issues.
 	 *
@@ -762,7 +762,7 @@ class Validator {
 		// checks. Parsing only `#set` here meant a `#def`-defined name was reported as possibly a
 		// runtime variable at every reference, and its cycles went undetected.
 		$extracted   = $this->parser()->extract_directives( $text );
-		$definitions = array_merge( $extracted['set'], $extracted['def'] );
+		$definitions = array_replace( $extracted['set'], $extracted['def'] );
 
 		// Check for self-referencing variables.
 		foreach ( $definitions as $name => $value ) {
@@ -810,7 +810,9 @@ class Validator {
 		$all_refs = array_merge( $percent_matches[1] ?? array(), $cond_matches[1] ?? array() );
 
 		if ( ! empty( $all_refs ) ) {
-			$defined_names = array_keys( $definitions );
+			// Strings, not keys: PHP hands back an integer-like name as an int, and the strict
+			// in_array() below then never finds '7' — a false warning on `#def %7%` (spintax-js#84).
+			$defined_names = array_map( 'strval', array_keys( $definitions ) );
 			$global_lower  = array_map( 'strtolower', $global_var_names );
 			$all_known     = array_merge( $defined_names, $global_lower );
 

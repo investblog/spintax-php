@@ -6,6 +6,43 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.11.0 — 2026-10-03
+
+**Arabic plurals, CJK separators, and digits-only names.** Matches `@spintax/core` 0.11.0 change for
+change. Minor, because a verdict changes (a two-form `ar` plural is now an error) and rendered text
+moves for the shapes below.
+
+### Added
+
+**Arabic takes six plural forms** (spintax-js#88). `plural_arity( 'ar' )` is 6 and `plural_for()` picks
+in CLDR order: zero (0), one (1), two (2), few (n % 100 in 3..10), many (n % 100 in 11..99), other
+(the rest — 100–102, 200–202, …). It used to take the English two-form rule. The arity is strict: a
+two-form `ar` block is now `plural.arity` and renders as the fullwidth fallback.
+
+### Fixed
+
+**A Chinese or Japanese list separator joins without spaces** (spintax-js#87). A letter-only separator
+is padded with spaces on join, except now when every letter is Han, Hiragana or Katakana (plus
+U+30FC/U+FF70): `[<lastsep="和">SSO|告警]` renders `SSO和告警`, not `SSO 和 告警`. Hangul and mixed-script
+separators keep the padding.
+
+**A definition named only with digits keeps its value** (spintax-js#84). `#def %7% = rolled` / `%7%`
+printed `%7%`, `#set %7% = S` likewise, and a chain of two such names repeated a fragment. PHP turns an
+integer-like string key into an int, and `array_merge()` RENUMBERS int keys instead of overwriting
+them, so every merge of the variable maps — `RenderContext`'s `get_merged_variables()`, `with_local()`
+and `with_runtime()`, `Parser::process()` and the validator's definition map — moved the value to a
+fresh index. They use `array_replace()` now. `%07%` was never affected (`07` is not a canonical
+integer key); `%0%` rendered right on its own but could be renumbered too when another integer-like name
+came before it. Both are pinned as controls.
+
+### Tests
+
+The corpus runner computes `extract`'s `refs` over the body with each `#set`/`#def` LEFT-HAND SIDE
+stripped and its value kept — the rule `@spintax/core` and `spintax-core` implement as public API
+(spintax-js#83). It used to drop the whole `#set` line and keep the whole `#def` one, so a reference
+inside a directive value was missed and a `#def` name nothing used was reported. The corpus is 386 cases;
+the 376 this engine asserts are green (the `neutralize` cases do not apply to PHP).
+
 ## 0.10.0 — 2026-09-19
 
 **No stray space before a closing quote or bracket.** Matches `@spintax/core` 0.10.0 change for change.

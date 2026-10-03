@@ -151,13 +151,12 @@ final class GoldenCorpusTest extends TestCase {
 			$this->assertSameSet( $expect['includes'], $includes, "includes for {$c['id']}" );
 			$asserted = true;
 		}
-		// Left alone deliberately, and it is NOT what the other engines scan: they strip the
-		// `#set`/`#def` left-hand side only and keep the value, while this drops the whole `#set`
-		// line and keeps the whole `#def` one. No fixture separates the two rules yet; which one
-		// is contract is investblog/spintax-js#83, and moving it here alone would trade one
-		// divergence for its mirror image.
+		// The rule `@spintax/core` and `spintax-core` implement as public API (spintax-js#83): strip
+		// each `#set`/`#def` LEFT-HAND SIDE and keep the value, so a reference inside a value counts
+		// and a definition's own name does not. This used to drop the whole `#set` line and keep the
+		// whole `#def` one; the `extract/ref-inside-*` fixtures are what separate the two rules.
 		if ( array_key_exists( 'refs', $expect ) ) {
-			$body = $parser->extract_set_directives( $text )['body'];
+			$body = $this->stripDefinitionLhs( $text );
 			$this->assertSameSet( $expect['refs'], $this->extractRefs( $body ), "refs for {$c['id']}" );
 			$asserted = true;
 		}
@@ -232,6 +231,21 @@ final class GoldenCorpusTest extends TestCase {
 			};
 		}
 		return static fn( int $min, int $max ): int => $min;
+	}
+
+	/**
+	 * Drop each `#set`/`#def … =` left-hand side, keeping the value.
+	 *
+	 * Spelled out to match the reference's `/^[ \t]*#(?:set|def)[ \t]+%\w+%[ \t]*=/gmu`: a line
+	 * starts after LF, CR, U+2028 or U+2029 (ECMAScript's `/m`; PCRE's breaks on LF only), and the
+	 * name is ASCII (`\w` under `/u` is Unicode in PCRE).
+	 */
+	private function stripDefinitionLhs( string $text ): string {
+		return (string) preg_replace(
+			'/(?:^|(?<=[\n\r\x{2028}\x{2029}]))[ \t]*#(?:set|def)[ \t]+%[A-Za-z0-9_]+%[ \t]*=/u',
+			'',
+			$text
+		);
 	}
 
 	/**

@@ -49,6 +49,12 @@ final class ParserProcessDefTest extends TestCase {
 		);
 	}
 
+	public function test_process_keeps_a_digits_only_definition_name(): void {
+		// spintax-js#84: an integer-like key is an int to PHP, and array_merge() renumbered it, so
+		// `%7%` printed literally. The corpus runs `Pipeline`, not this path — hence the pin here.
+		$this->assertSame( 'Rolled S', trim( $this->parser()->process( "#def %7% = rolled\n#set %1% = S\n%7% %1%" ) ) );
+	}
+
 	public function test_caller_supplied_variables_outrank_a_def(): void {
 		$this->assertSame(
 			'CALLER',

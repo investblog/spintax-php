@@ -45,6 +45,12 @@ final class ValidatorDirectivesTest extends TestCase {
 
 	// ── the validator sees #def ───────────────────────────────────────────────
 
+	public function test_a_digits_only_definition_name_is_not_reported_as_unknown(): void {
+		// spintax-js#84: array_keys() returns `7` as an int and the strict in_array() missed it.
+		// The corpus runners assert verdicts, not warnings, so only this can see it.
+		$this->assertSame( array(), $this->validate( "#def %7% = a\n#set %1% = b\n%7% %1%" )['warnings'] );
+	}
+
 	public function test_a_def_defined_name_is_not_reported_as_unknown(): void {
 		$this->assertSame( array(), $this->validate( "#def %x% = a\n%x%" )['warnings'] );
 	}
