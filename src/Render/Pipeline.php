@@ -244,7 +244,7 @@ final class Pipeline {
 		$text = $this->parser->resolve_enumerations( $text );
 
 		// Stage 8: permutations.
-		$text = $this->parser->resolve_permutations( $text );
+		$text = $this->parser->resolve_permutations( $text, $locale );
 
 		// Restore the host constructs — stage 9 is where they get their turn.
 		$text = self::restore_shielded( $text, $shielded, $unambiguous );
@@ -390,7 +390,7 @@ final class Pipeline {
 		$value = $this->conditionals->apply( $value, $vars );
 		$value = $this->plurals->apply( $value, $locale, array( 'lenient' => true ) );
 		$value = $this->parser->resolve_enumerations( $value );
-		$value = $this->parser->resolve_permutations( $value );
+		$value = $this->parser->resolve_permutations( $value, $locale );
 
 		$value = self::restore_shielded( $value, $shielded, $unambiguous );
 

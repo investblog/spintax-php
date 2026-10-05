@@ -6,6 +6,27 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.12.0 — 2026-10-06
+
+**Arabic, Hebrew, Thai and Lao list separators.** Matches `@spintax/core` 0.12.0 change for change.
+Minor, because rendered text moves; no verdict changes.
+
+- **و attaches to the next word under `ar` (investblog/spintax-js#90).** A letter-only separator was
+  padded on both sides whatever spaces the author wrote, so `الكازينو والبث` could not be produced. Now a
+  separator that is exactly و or ف, rendered under an `ar` locale, keeps the space before it and none
+  after when the next element starts with an Arabic letter, and both spaces before anything else
+  (`و Evolution`). Hebrew ו under `he` likewise. Keyed by language: `fa`, `ur`, no locale, and word
+  conjunctions (أو, או) are padded as before.
+- **Thai, Lao, Khmer and Myanmar separators join bare,** like Han and kana since 0.11.0.
+- **`resolve_permutations()` takes an optional second argument, the locale** (raw, as `Plurals::apply()`
+  takes it). `Pipeline` passes its own; a direct caller that passes none keeps the previous behaviour.
+- **Fixed: a separator in a kana repeat mark, 〆 or 〼 joined bare on PCRE2 10.40 and later** (PHP 8.2+).
+  That PCRE2 reads `\p{Han}`, `\p{Hiragana}` and `\p{Katakana}` as Script_Extensions, which takes
+  U+3006, U+303C, U+3031–3035 and U+FF9E/FF9F; the reference reads Script and pads them. They are
+  excluded now, so the answer no longer depends on the PCRE2 version. Shipped in 0.11.0.
+
+Corpus 408 (+22).
+
 ## 0.11.0 — 2026-10-03
 
 **Arabic plurals, CJK separators, and digits-only names.** Matches `@spintax/core` 0.11.0 change for
