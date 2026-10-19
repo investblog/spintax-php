@@ -734,10 +734,18 @@ class Parser {
 	 *   4. Capitalise sentences
 	 *   5. Restore placeholders
 	 *
-	 * @param string $text Text to post-process.
+	 * @param string $text   Text to post-process.
+	 * @param string $locale Render locale (raw, e.g. "tr" / "az_AZ"); only its base language is read, by the
+	 *                       capitalisers (spintax-js#94). Empty: no language rule.
 	 * @return string Cleaned-up text.
 	 */
-	public function post_process( string $text ): string {
+	public function post_process( string $text, string $locale = '' ): string {
+		// Turkish and Azerbaijani pair dotted i with İ and dotless ı with I (spintax-js#94), so a sentence
+		// opening on i gets İ there. An explicit mapping: mb_strtoupper() has no locale, and the engines must agree.
+		$parts = preg_split( '/[-_]/', strtolower( $locale ), 2 );
+		$upper = in_array( $parts[0] ?? '', array( 'tr', 'az' ), true )
+			? static fn( string $c ): string => 'i' === $c ? 'İ' : mb_strtoupper( $c, 'UTF-8' )
+			: static fn( string $c ): string => mb_strtoupper( $c, 'UTF-8' );
 		// Whether the CALLER's own text carries a NUL decides how step 12 restores. Read it here,
 		// before the shield mints any of its own — afterwards the two are indistinguishable.
 		$input_has_nul                   = str_contains( $text, "\x00" );
@@ -792,8 +800,12 @@ class Parser {
 		// runs, so on ordinary input it never bites; it is there for a caller-supplied NUL, which
 		// would otherwise let a URI match run through the delimiters of a placeholder minted
 		// after it.
+		//
+		// A `//` scheme is a URI even with no body: prose that names the protocol — `(https://)` —
+		// got a space after its colon, `(https: //)`. `mailto:`/`tel:` still need one, or a
+		// sentence-initial `Tel: 555` would be shielded from the capitaliser as a bare `tel`.
 		$text = preg_replace_callback(
-			'~(?:(?:https?|ftp)://|(?:mailto|tel):)[^\x00\s<>"\')\]]+~iu',
+			'~(?:(?:https?|ftp)://[^\x00\s<>"\')\]]*|(?:mailto|tel):[^\x00\s<>"\')\]]+)~iu',
 			static function ( array $m ) use ( $store_with_trailing_punctuation ): string {
 				// URL and URI stay distinct prefixes even though one pass mints both — they are
 				// what the other engines' fixtures and the restore's token shape speak.
@@ -812,6 +824,21 @@ class Parser {
 			'~[a-z0-9._%+\-]++(?:@' . $domain_part . '\b|(*SKIP)(*FAIL))~iu',
 			static function ( array $m ) use ( $store_placeholder ): string {
 				return $store_placeholder( $m[0], 'EMAIL' );
+			},
+			$text
+		);
+
+		// 2a. Shield: a token that BEGINS with a dot — `.NET`, `.gitignore`, `.env.local`, `.xlsx`, `.5` — so the
+		// punctuation passes do not take its dot for a sentence end: `and .NET` was `and. NET`, `the .apk file`
+		// was `the. Apk file` (spintax-js#91). A token starts after the subject start, whitespace, an opening
+		// bracket, a quote, a tag or a path separator (`src/.env`, `dir\.env`) — an explicit set, so `See...and more` keeps its
+		// ellipsis. The tail takes
+		// dots (`.tar.gz`) and releases trailing punctuation (`.NET.`). Before the domain pass, or `env.local`
+		// is shielded as a domain first and the leading dot is left bare.
+		$text = preg_replace_callback(
+			'/(?<=^|\s|[(\[{>\/\\\\\'"«»‹›“”‘’])\.[\p{L}\p{N}][\p{L}\p{N}_.\-]*/u',
+			static function ( array $m ) use ( $store_with_trailing_punctuation ): string {
+				return $store_with_trailing_punctuation( $m[0], 'DOTTOK' );
 			},
 			$text
 		);
@@ -968,7 +995,7 @@ class Parser {
 		// 8. Capitalise first letter (skip leading HTML tags and sentence openers).
 		$text = preg_replace_callback(
 			'/^(' . $lead . ')(\p{Ll})/u',
-			static fn( array $m ): string => $m[1] . mb_strtoupper( $m[2], 'UTF-8' ),
+			static fn( array $m ): string => $m[1] . $upper( $m[2] ),
 			$text
 		);
 
@@ -976,7 +1003,7 @@ class Parser {
 		// For example: "text. Next", "text.</p><p>next" and "Hola. ¿<em>Qué</em> tal?".
 		$text = preg_replace_callback(
 			'/([.!?…])(' . $lead . ')(\p{Ll})/u',
-			static fn( array $m ): string => $m[1] . $m[2] . mb_strtoupper( $m[3], 'UTF-8' ),
+			static fn( array $m ): string => $m[1] . $m[2] . $upper( $m[3] ),
 			$text
 		);
 
@@ -984,14 +1011,14 @@ class Parser {
 		// Covers p, h1-h6, li, blockquote, div, td, th.
 		$text = preg_replace_callback(
 			'/(<\/?(?:p|h[1-6]|li|blockquote|div|td|th)[^>]*>' . $lead . ')(\p{Ll})/ui',
-			static fn( array $m ): string => $m[1] . mb_strtoupper( $m[2], 'UTF-8' ),
+			static fn( array $m ): string => $m[1] . $upper( $m[2] ),
 			$text
 		);
 
 		// 11. Capitalise after line breaks.
 		$text = preg_replace_callback(
 			'/(\n' . $lead . ')(\p{Ll})/u',
-			static fn( array $m ): string => $m[1] . mb_strtoupper( $m[2], 'UTF-8' ),
+			static fn( array $m ): string => $m[1] . $upper( $m[2] ),
 			$text
 		);
 

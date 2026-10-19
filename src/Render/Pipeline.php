@@ -158,7 +158,7 @@ final class Pipeline {
 		// Stage 10. Cosmetic post-process, ONCE, over the fully assembled document — including
 		// whatever the includes brought in. Running it per-nested-render instead would post-process
 		// the same text repeatedly and treat every fragment as if it began a sentence.
-		return $post_process ? $this->parser->post_process( $text ) : $text;
+		return $post_process ? $this->parser->post_process( $text, $locale ) : $text;
 	}
 
 	/**
