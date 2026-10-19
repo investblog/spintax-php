@@ -66,8 +66,10 @@ class Validator {
 		$errors   = array();
 		$warnings = array();
 
-		// Strip comments before analysis.
-		$text = $this->parser()->strip_comments( $template );
+		// The parser's projection: comments removed, `/! … !/` spans encoded — nothing inside a span
+		// is seen, so a bracket or a reference there raises nothing (spintax-js ADR 0001 rule 9).
+		$projection = $this->parser()->project_source( $template );
+		$text       = $projection['text'];
 
 		$errors = array_merge( $errors, $this->check_brackets( $text ) );
 		$errors = array_merge( $errors, $this->check_directives( $text ) );
@@ -84,10 +86,88 @@ class Validator {
 			$errors = array_merge( $errors, $this->check_include_targets( $text, $known_slugs ) );
 		}
 
+		// After a comment or a span the projection's lines and columns are not the source's.
+		if ( $text !== $template ) {
+			$errors   = $this->to_source_positions( $errors, $text, $template, $projection['segments'] );
+			$warnings = $this->to_source_positions( $warnings, $text, $template, $projection['segments'] );
+		}
+
+		// Not silent, as an unclosed comment is: the text after it parses as spintax, and a markdown
+		// link there quietly becomes a permutation of one. Once — no later opener can close either.
+		if ( -1 !== $projection['unclosed'] ) {
+			$before     = substr( $template, 0, $projection['unclosed'] );
+			$line_start = strrpos( $before, "\n" );
+			$warnings[] = array(
+				'message' => "Unclosed '/!' — the text after it is parsed as spintax.",
+				'line'    => substr_count( $before, "\n" ) + 1,
+				'column'  => $projection['unclosed'] - ( false === $line_start ? 0 : $line_start + 1 ) + 1,
+			);
+		}
+
 		return array(
 			'errors'   => $errors,
 			'warnings' => $warnings,
 		);
+	}
+
+	/**
+	 * Move diagnostics placed in the projection back onto the author's source (byte columns).
+	 *
+	 * @param array<int, array<string, mixed>>                   $diagnostics Diagnostics with line/column in the projection.
+	 * @param string                                             $text        The projection.
+	 * @param string                                             $template    The source.
+	 * @param array<int, array{0: int, 1: int, 2: int, 3: bool}> $segments    The projection's segments.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function to_source_positions( array $diagnostics, string $text, string $template, array $segments ): array {
+		// Built once: a rescan of the source prefix per diagnostic made a template of unmatched
+		// brackets after a comment quadratic.
+		$starts        = self::line_starts( $text );
+		$source_starts = self::line_starts( $template );
+		foreach ( $diagnostics as $i => $d ) {
+			// A message quoting the projection would quote a token (ADR 0001 rule 6).
+			if ( isset( $d['message'] ) && is_string( $d['message'] ) ) {
+				$diagnostics[ $i ]['message'] = Parser::decode_verbatim( $d['message'] );
+			}
+			if ( ! isset( $d['line'], $d['column'] ) ) {
+				continue;
+			}
+			$line   = max( 1, min( (int) $d['line'], count( $starts ) ) );
+			$at     = min( $starts[ $line - 1 ] + (int) $d['column'] - 1, strlen( $text ) );
+			$source = Parser::source_offset( $segments, $at );
+
+			// The last line start at or before the offset.
+			$lo = 0;
+			$hi = count( $source_starts ) - 1;
+			while ( $lo < $hi ) {
+				$mid = ( $lo + $hi + 1 ) >> 1;
+				if ( $source_starts[ $mid ] <= $source ) {
+					$lo = $mid;
+				} else {
+					$hi = $mid - 1;
+				}
+			}
+
+			$diagnostics[ $i ]['line']   = $lo + 1;
+			$diagnostics[ $i ]['column'] = $source - $source_starts[ $lo ] + 1;
+		}
+		return $diagnostics;
+	}
+
+	/**
+	 * Byte offsets at which each line of a text starts.
+	 *
+	 * @param string $text Text.
+	 * @return int[]
+	 */
+	private static function line_starts( string $text ): array {
+		$starts = array( 0 );
+		$offset = strpos( $text, "\n" );
+		while ( false !== $offset ) {
+			$starts[] = $offset + 1;
+			$offset   = strpos( $text, "\n", $offset + 1 );
+		}
+		return $starts;
 	}
 
 	/**

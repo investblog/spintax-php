@@ -67,6 +67,34 @@ final class PipelineTest extends TestCase {
 		$this->assertSame( 'g=GLOBAL r=RUNTIME local=%local%', $out );
 	}
 
+	public function test_a_runtime_value_cannot_carry_a_verbatim_token_through_a_render_context(): void {
+		// A ready-made token for `{a}`: U+F0000, the digit pairs of each code point, U+F0001.
+		$token   = Parser::encode_verbatim( '{a}' );
+		$context = new RenderContext( array(), array(), array( 'v' => "x{$token}y" ) );
+		$out     = $this->pipeline( array() )->render( '%v%', array(), $context, '', false );
+
+		// The span range is stripped where runtime values enter, whichever door they use.
+		$this->assertSame( 'xy', $out );
+		$this->assertSame( 'xy', $this->pipeline( array() )->render( '%v%', array( 'v' => "x{$token}y" ), null, '', false ) );
+	}
+
+	public function test_validation_after_many_diagnostics_stays_linear(): void {
+		$started = microtime( true );
+		$result  = ( new \Spintax\Core\Engine\Validator() )->validate( '/#x#/' . str_repeat( '}', 50000 ) );
+
+		$this->assertLessThan( 2.0, microtime( true ) - $started );
+		$this->assertCount( 50000, $result['errors'] );
+		$this->assertSame( 50005, $result['errors'][49999]['column'] );
+	}
+
+	public function test_a_diagnostic_quotes_the_author_text_not_a_verbatim_token(): void {
+		$result = ( new \Spintax\Core\Engine\Validator() )->validate( '[<minsize=/!x!/>a|b]' );
+
+		$this->assertNotEmpty( $result['errors'] );
+		$this->assertStringContainsString( 'x', $result['errors'][0]['message'] );
+		$this->assertStringNotContainsString( "\xF3\xB0", $result['errors'][0]['message'] );
+	}
+
 	public function test_a_circular_include_resolves_to_nothing_instead_of_hanging(): void {
 		$p = $this->pipeline(
 			array(

@@ -8,6 +8,7 @@
  *   %var%           — variable reference
  *   #set %var% = v  — variable definition
  *   /#...#/         — comments
+ *   /!...!/         — verbatim span (emitted as written)
  *   #include "slug" — template include directive
  *
  * @package Spintax
@@ -165,6 +166,7 @@ class Parser {
 	 * @throws \RuntimeException If template processing encounters unresolvable syntax.
 	 */
 	public function process( string $template, array $variables = array() ): string {
+		$variables = array_map( array( self::class, 'strip_span_range' ), $variables );
 		$text      = $this->strip_comments( $template );
 		$extracted = $this->extract_directives( $text );
 		$text      = $extracted['body'];
@@ -206,18 +208,280 @@ class Parser {
 		$text      = $this->resolve_enumerations( $text );
 		$text      = $this->resolve_permutations( $text );
 		$text      = $this->post_process( $text );
+		$text = self::decode_verbatim( $text );
 
 		return $text;
 	}
 
 	/**
-	 * Strip block comments delimited by /# ... #/.
+	 * Strip block comments delimited by /# ... #/ — and encode `/! … !/` verbatim spans.
+	 *
+	 * The projection of {@see project_source()}: every door from author source into the stages
+	 * goes through here, so each one carries spans.
 	 *
 	 * @param string $text Text containing block comments.
-	 * @return string Text with comments removed.
+	 * @return string Text with comments removed and spans encoded.
 	 */
 	public function strip_comments( string $text ): string {
-		return preg_replace( '~/\#.*?\#/~su', '', $text );
+		return $this->project_source( $text )['text'];
+	}
+
+	/**
+	 * First code point of a verbatim-span token, U+F0000, in UTF-8. A text without it holds none.
+	 */
+	private const VERBATIM_OPEN = "\xF3\xB0\x80\x80";
+
+	/**
+	 * The span range U+F0000–U+F1FFF: the token's opener, closer and digits.
+	 */
+	private const SPAN_RANGE_PATTERN = '/[\x{F0000}-\x{F1FFF}]/u';
+
+	/**
+	 * A well-formed token: U+F0000, one pair of digits U+F1000+n per code point, U+F0001.
+	 */
+	private const VERBATIM_TOKEN_PATTERN = '/\x{F0000}((?:[\x{F1000}-\x{F1FFF}]{2})*)\x{F0001}/u';
+
+	/**
+	 * Scan author source once (spintax-js#92, ADR 0001): the next `/#` or `/!`, whichever comes
+	 * first, runs to the first matching closer searched from the END of the opener, so `/!/` does
+	 * not close itself. A comment is removed; a span is replaced where it stands by a token that
+	 * carries its content, an empty one removed. An opener with no closer is two characters of
+	 * text and the scan goes on after it — the reading of `~/\#.*?\#/|/!.*?!/~s`. Outside spans
+	 * the span range is stripped, so an author cannot type a ready-made token.
+	 *
+	 * Every later stage reads the projection, so none of them sees into a span, and the token
+	 * rides along wherever text goes: a `#set` value, an `#include` body, a spliced value.
+	 * Linear: once a closer is missing from some offset on, it is missing from every later one.
+	 *
+	 * @param string $text Author source.
+	 * @return array{text: string, spans: int, unclosed: int, segments: array<int, array{0: int, 1: int, 2: int, 3: bool}>}
+	 *         The projection; spans found (the empty one included); the byte offset of the first
+	 *         `/!` with no closer, or -1; segments [projection offset, source start, source end, is token].
+	 */
+	public function project_source( string $text ): array {
+		$out      = '';
+		$segments = array();
+		$spans    = 0;
+		$unclosed = -1;
+
+		$copy = static function ( int $start, int $end ) use ( $text, &$out, &$segments ): void {
+			if ( $start >= $end ) {
+				return;
+			}
+			$chunk  = substr( $text, $start, $end - $start );
+			$pieces = preg_split( self::SPAN_RANGE_PATTERN, $chunk, -1, PREG_SPLIT_OFFSET_CAPTURE );
+			if ( false === $pieces ) {
+				$pieces = array( array( $chunk, 0 ) );
+			}
+			foreach ( $pieces as $piece ) {
+				if ( '' === $piece[0] ) {
+					continue;
+				}
+				$segments[] = array( strlen( $out ), $start + $piece[1], $start + $piece[1] + strlen( $piece[0] ), false );
+				$out       .= $piece[0];
+			}
+		};
+
+		$from         = 0;
+		$at           = 0;
+		$next_comment = -2;
+		$next_span    = -2;
+		$comment_gone = false;
+		$span_gone    = false;
+		while ( true ) {
+			if ( -1 !== $next_comment && $next_comment < $at ) {
+				$found        = strpos( $text, '/#', $at );
+				$next_comment = false === $found ? -1 : $found;
+			}
+			if ( -1 !== $next_span && $next_span < $at ) {
+				$found     = strpos( $text, '/!', $at );
+				$next_span = false === $found ? -1 : $found;
+			}
+			if ( -1 === $next_comment && -1 === $next_span ) {
+				break;
+			}
+			$is_span = -1 === $next_comment || ( -1 !== $next_span && $next_span < $next_comment );
+			$open    = $is_span ? $next_span : $next_comment;
+			$gone    = $is_span ? $span_gone : $comment_gone;
+			$close   = $gone ? false : strpos( $text, $is_span ? '!/' : '#/', $open + 2 );
+			if ( false === $close ) {
+				if ( $is_span ) {
+					$span_gone = true;
+					if ( -1 === $unclosed ) {
+						$unclosed = $open;
+					}
+				} else {
+					$comment_gone = true;
+				}
+				$at = $open + 2;
+				continue;
+			}
+			$copy( $from, $open );
+			if ( $is_span ) {
+				++$spans;
+				if ( $close > $open + 2 ) {
+					$segments[] = array( strlen( $out ), $open, $close + 2, true );
+					$out       .= self::encode_verbatim( substr( $text, $open + 2, $close - $open - 2 ) );
+				}
+			}
+			$from = $close + 2;
+			$at   = $from;
+		}
+		$copy( $from, strlen( $text ) );
+
+		return array(
+			'text'     => $out,
+			'spans'    => $spans,
+			'unclosed' => $unclosed,
+			'segments' => $segments,
+		);
+	}
+
+	/**
+	 * Map a byte offset in a projection back to the source, through its segments.
+	 *
+	 * @param array<int, array{0: int, 1: int, 2: int, 3: bool}> $segments From {@see project_source()}.
+	 * @param int                                                $offset   Byte offset in the projection.
+	 * @return int Byte offset in the source.
+	 */
+	public static function source_offset( array $segments, int $offset ): int {
+		$lo = 0;
+		$hi = count( $segments ) - 1;
+		if ( $hi < 0 ) {
+			return 0;
+		}
+		while ( $lo < $hi ) {
+			$mid = ( $lo + $hi + 1 ) >> 1;
+			if ( $segments[ $mid ][0] <= $offset ) {
+				$lo = $mid;
+			} else {
+				$hi = $mid - 1;
+			}
+		}
+		$delta = $offset - $segments[ $lo ][0];
+		if ( $delta <= 0 ) {
+			return $segments[ $lo ][1];
+		}
+		if ( $segments[ $lo ][3] ) {
+			return $segments[ $lo ][2];
+		}
+		return min( $segments[ $lo ][1] + $delta, $segments[ $lo ][2] );
+	}
+
+	/**
+	 * Encode a span's content as a token: U+F0000, then for each code point c the digits
+	 * U+F1000 + (c >> 12) and U+F1000 + (c & 0xFFF), then U+F0001. Content that is not valid
+	 * UTF-8 cannot be read by code point and is left as it is (no stage of this engine reads such
+	 * text either).
+	 *
+	 * @param string $content Span content.
+	 * @return string The token.
+	 */
+	public static function encode_verbatim( string $content ): string {
+		$chars = preg_split( '//u', $content, -1, PREG_SPLIT_NO_EMPTY );
+		if ( false === $chars ) {
+			return $content;
+		}
+		$out = self::VERBATIM_OPEN;
+		foreach ( $chars as $ch ) {
+			$c    = self::code_point( $ch );
+			$out .= self::utf8( 0xF1000 + ( $c >> 12 ) ) . self::utf8( 0xF1000 + ( $c & 0xFFF ) );
+		}
+		return $out . "\xF3\xB0\x80\x81";
+	}
+
+	/**
+	 * Replace every well-formed token by its content — one pass that never re-reads what it
+	 * emitted, so a span whose content is itself a token decodes once. The last step of a render,
+	 * after the post-process (ADR 0001 rule 7).
+	 *
+	 * @param string $text Rendered text.
+	 * @return string Text with spans restored.
+	 */
+	public static function decode_verbatim( string $text ): string {
+		if ( false === strpos( $text, self::VERBATIM_OPEN ) ) {
+			return $text;
+		}
+		$decoded = preg_replace_callback(
+			self::VERBATIM_TOKEN_PATTERN,
+			static function ( array $m ): string {
+				$out = '';
+				// Every digit is four bytes of UTF-8.
+				for ( $i = 0, $n = strlen( $m[1] ); $i + 8 <= $n; $i += 8 ) {
+					$high = self::code_point( substr( $m[1], $i, 4 ) ) - 0xF1000;
+					$low  = self::code_point( substr( $m[1], $i + 4, 4 ) ) - 0xF1000;
+					$out .= self::utf8( ( $high << 12 ) | $low );
+				}
+				return $out;
+			},
+			$text
+		);
+		return null === $decoded ? $text : $decoded;
+	}
+
+	/**
+	 * What a value costs the expansion budget: its length with every token counted as its content
+	 * (ADR 0001 rule 7a), so the encoding does not move the point where a bounded expansion stops.
+	 *
+	 * @param string $value Variable value.
+	 * @return int Bytes charged.
+	 */
+	public static function budget_length( string $value ): int {
+		return false === strpos( $value, self::VERBATIM_OPEN ) ? strlen( $value ) : strlen( self::decode_verbatim( $value ) );
+	}
+
+	/**
+	 * Strip the span range from a runtime value, so data cannot carry a ready-made token past the
+	 * template's own sanitising (ADR 0001 rule 4).
+	 *
+	 * @param string $value Runtime value.
+	 * @return string The value without U+F0000–U+F1FFF.
+	 */
+	public static function strip_span_range( string $value ): string {
+		if ( false === strpos( $value, "\xF3\xB0" ) && false === strpos( $value, "\xF3\xB1" ) ) {
+			return $value;
+		}
+		$stripped = preg_replace( self::SPAN_RANGE_PATTERN, '', $value );
+		return null === $stripped ? $value : $stripped;
+	}
+
+	/**
+	 * The code point of one UTF-8 character.
+	 *
+	 * @param string $ch One character.
+	 * @return int
+	 */
+	private static function code_point( string $ch ): int {
+		$b = array_values( (array) unpack( 'C*', $ch ) );
+		switch ( count( $b ) ) {
+			case 1:
+				return $b[0];
+			case 2:
+				return ( ( $b[0] & 0x1F ) << 6 ) | ( $b[1] & 0x3F );
+			case 3:
+				return ( ( $b[0] & 0x0F ) << 12 ) | ( ( $b[1] & 0x3F ) << 6 ) | ( $b[2] & 0x3F );
+			default:
+				return ( ( $b[0] & 0x07 ) << 18 ) | ( ( $b[1] & 0x3F ) << 12 ) | ( ( $b[2] & 0x3F ) << 6 ) | ( $b[3] & 0x3F );
+		}
+	}
+
+	/**
+	 * One code point as UTF-8.
+	 *
+	 * @param int $cp Code point.
+	 * @return string
+	 */
+	private static function utf8( int $cp ): string {
+		if ( $cp < 0x80 ) {
+			return chr( $cp );
+		}
+		if ( $cp < 0x800 ) {
+			return chr( 0xC0 | ( $cp >> 6 ) ) . chr( 0x80 | ( $cp & 0x3F ) );
+		}
+		if ( $cp < 0x10000 ) {
+			return chr( 0xE0 | ( $cp >> 12 ) ) . chr( 0x80 | ( ( $cp >> 6 ) & 0x3F ) ) . chr( 0x80 | ( $cp & 0x3F ) );
+		}
+		return chr( 0xF0 | ( $cp >> 18 ) ) . chr( 0x80 | ( ( $cp >> 12 ) & 0x3F ) ) . chr( 0x80 | ( ( $cp >> 6 ) & 0x3F ) ) . chr( 0x80 | ( $cp & 0x3F ) );
 	}
 
 	/**
@@ -622,7 +886,7 @@ class Parser {
 					if ( $budget <= 0 ) {
 						return $m[0];
 					}
-					$budget -= strlen( $normalised[ $name ] );
+					$budget -= self::budget_length( $normalised[ $name ] );
 					$changed = true;
 					return $normalised[ $name ];
 				},
@@ -1086,7 +1350,7 @@ class Parser {
 				$line = $cursor_line;
 
 				$includes[] = array(
-					'slug'   => $matches[1][ $i ][0],
+					'slug'   => self::decode_verbatim( $matches[1][ $i ][0] ),
 					'line'   => $line,
 					'start'  => $offset,
 					'length' => strlen( $full_match[0] ),
@@ -1107,7 +1371,8 @@ class Parser {
 	public function resolve_includes( string $text, callable $resolver ): string {
 		return preg_replace_callback(
 			self::INCLUDE_PATTERN,
-			static fn( array $m ): string => $resolver( $m[1] ),
+			// A span in the ref reaches the host decoded (ADR 0001 rule 6): it never sees a token.
+			static fn( array $m ): string => $resolver( self::decode_verbatim( $m[1] ) ),
 			$text
 		);
 	}

@@ -6,6 +6,23 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.14.0 — 2026-10-19
+
+**A verbatim span, `/! … !/` (investblog/spintax-js#92).** Matches `@spintax/core` 0.14.0. Minor, because
+the syntax surface grows; no stored output changes (the delimiters occur 0 times in the family's stored
+templates).
+
+- **`/! … !/` is emitted exactly as written** — no spintax inside, no post-process. One scan with the
+  `/# … #/` comments (`Parser::project_source()`; `strip_comments()` returns its text): whichever opener
+  comes first wins, the first `!/` closes a span, `/!!/` is removed, an unclosed `/!` is plain text. The
+  content is carried through the stages as a token in U+F0000–U+F1FFF and decoded by
+  `Parser::decode_verbatim()` as the last step of `Pipeline::render()` and `Parser::process()`, with or
+  without the post-process. An `#include` ref is passed to the source decoded.
+- **Reserved range.** U+F0000–U+F1FFF is stripped from template text outside spans and from runtime
+  variables. The expansion budget charges a span as its content (`Parser::budget_length()`).
+- **`Validator`** sees nothing inside a span, warns about an unclosed `/!`, and reports positions after a
+  comment or a span on the source's lines and columns.
+
 ## 0.13.0 — 2026-10-19
 
 **Dot tokens, Turkish and Azerbaijani capital İ, bare `//` schemes.** Matches `@spintax/core` 0.13.0

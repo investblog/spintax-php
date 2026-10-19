@@ -7,6 +7,8 @@
 
 namespace Spintax\Core\Render;
 
+use Spintax\Core\Engine\Parser;
+
 /**
  * Immutable context object passed through the rendering pipeline.
  *
@@ -60,7 +62,10 @@ class RenderContext {
 	) {
 		$this->global_vars  = self::normalize_keys( $global_vars );
 		$this->local_vars   = self::normalize_keys( $local_vars );
-		$this->runtime_vars = self::normalize_keys( $runtime_vars );
+		// Runtime values are data, so the span range comes out of them wherever they enter: a value
+		// cannot carry a ready-made `/! … !/` token past the template's own sanitising (spintax-js
+		// ADR 0001 rule 4). `with_runtime()` and every derived context come through here too.
+		$this->runtime_vars = array_map( array( Parser::class, 'strip_span_range' ), self::normalize_keys( $runtime_vars ) );
 		$this->call_stack   = $call_stack;
 	}
 
