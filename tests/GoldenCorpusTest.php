@@ -175,7 +175,10 @@ final class GoldenCorpusTest extends TestCase {
 		$is_rng   = ( $c['kind'] ?? 'deterministic' ) === 'rng';
 		$strategy = $is_rng ? 'first' : ( $c['rng'] ?? 'first' );
 
-		$pipeline = new Pipeline( new Parser( $this->rng( $strategy ) ) );
+		// `includes` (ref → body) is the host's template store: an absent ref is unknown, null.
+		$includes = $c['includes'] ?? null;
+		$source   = null === $includes ? null : static fn( string $name ): ?string => $includes[ $name ] ?? null;
+		$pipeline = new Pipeline( new Parser( $this->rng( $strategy ) ), array(), $source );
 		$out      = $pipeline->render(
 			$c['template'],
 			$c['context'] ?? array(),
