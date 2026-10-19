@@ -6,6 +6,21 @@ All notable changes to `spintax/core` are documented here. This project adheres 
 Versions are published to Packagist from git tags — `composer.json` deliberately carries
 no `version` field, so a release is cut by tagging (`v0.2.0`), not by editing the manifest.
 
+## 0.13.0 — 2026-10-19
+
+**Dot tokens, Turkish and Azerbaijani capital İ, bare `//` schemes.** Matches `@spintax/core` 0.13.0
+change for change. Minor, because rendered text moves; no verdict changes.
+
+- **A dot that starts a token is not a sentence end (investblog/spintax-js#91).** `and .NET` rendered
+  `and. NET`, `the .apk file` rendered `the. Apk file`. A token that begins with a dot (`.NET`,
+  `.gitignore`, `.env.local`, `.xlsx`, `.5`) after the subject start, whitespace, an opening bracket, a
+  quote, a tag or a path separator is now shielded. Accepted cost: `end .Next` is no longer repaired.
+- **`post_process()` takes the render locale (investblog/spintax-js#94)** as an optional second argument
+  (default empty: existing callers are unchanged), and `Pipeline::render()` passes it. Under `tr`/`az` a
+  sentence that opens on `i` is capitalised to `İ`; dotless `ı` still becomes `I`.
+- **A `//` scheme with no body is shielded as a URL:** `(https://)` no longer renders `(https: //)`.
+  `mailto:` and `tel:` still need a body.
+
 ## 0.12.0 — 2026-10-06
 
 **Arabic, Hebrew, Thai and Lao list separators.** Matches `@spintax/core` 0.12.0 change for change.
